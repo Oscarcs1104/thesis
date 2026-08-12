@@ -10,30 +10,6 @@ from torch_geometric.nn import GATConv, GATv2Conv, GCNConv, GINConv, global_mean
 VALID_GRAPH_BACKBONES = {"gcn", "gat", "gatv2", "gin"}
 VALID_LANGUAGE_BACKBONES = {"chemberta", "none"}
 
-try:
-    import selfies as _selfies
-except Exception:  # pragma: no cover - optional dependency
-    _selfies = None
-
-
-def _smiles_to_selfies_texts(texts: Sequence[str]) -> List[str]:
-    # Convert SMILES to SELFIES when the package is available.
-    if _selfies is None:
-        return [str(text) for text in texts]
-
-    converted: List[str] = []
-    for text in texts:
-        smiles_text = "" if text is None else str(text).strip()
-        if not smiles_text:
-            converted.append("")
-            continue
-        try:
-            selfies_text = _selfies.encoder(smiles_text, strict=False)
-        except Exception:
-            selfies_text = smiles_text
-        converted.append(selfies_text or smiles_text)
-    return converted
-
 
 def _make_graph_conv(backbone: str, in_dim: int, out_dim: int) -> nn.Module:
     backbone = backbone.lower()
@@ -191,6 +167,7 @@ class LanguageEncoder(nn.Module):
         use_language: bool = True,
         language_model_name: str = "DeepChem/ChemBERTa-77M-MLM",
         freeze_language_backbone: bool = True,
+        trust_remote_code: bool = False,
     ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -205,25 +182,26 @@ class LanguageEncoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList()
+        # Only exercised when `lang` arrives as a precomputed tensor instead of raw text.
         self.input_proj = nn.Linear(hidden_dim, hidden_dim)
-        self.chemberta_tokenizer = None
-        self.chemberta_model = None
-        self.chemberta_proj = None
+        self.text_tokenizer = None
+        self.text_model = None
+        self.text_proj = None
 
         if self.use_language:
             try:
                 from transformers import AutoModel, AutoTokenizer
             except Exception as exc:  # pragma: no cover - runtime dependency guard
                 raise RuntimeError(
-                    "transformers is required for language_backbone='chemberta'. Install transformers and sentencepiece."
+                    "transformers is required for the language branch. Install transformers and sentencepiece."
                 ) from exc
 
-            self.chemberta_tokenizer = AutoTokenizer.from_pretrained(self.language_model_name)
-            self.chemberta_model = AutoModel.from_pretrained(self.language_model_name)
-            chemberta_hidden = int(getattr(self.chemberta_model.config, "hidden_size", hidden_dim))
-            self.chemberta_proj = nn.Linear(chemberta_hidden, hidden_dim)
+            self.text_tokenizer = AutoTokenizer.from_pretrained(self.language_model_name, trust_remote_code=trust_remote_code)
+            self.text_model = AutoModel.from_pretrained(self.language_model_name, trust_remote_code=trust_remote_code)
+            text_hidden = int(getattr(self.text_model.config, "hidden_size", hidden_dim))
+            self.text_proj = nn.Linear(text_hidden, hidden_dim)
             if self.freeze_language_backbone:
-                for parameter in self.chemberta_model.parameters():
+                for parameter in self.text_model.parameters():
                     parameter.requires_grad = False
 
             for layer_idx in range(num_layers):
@@ -236,8 +214,8 @@ class LanguageEncoder(nn.Module):
                     )
                 )
 
-    def _pool_chemberta(self, lang: Any, device: torch.device) -> torch.Tensor:
-        # ChemBERTa works on raw SMILES strings or precomputed tensors.
+    def _pool_text_backbone(self, lang: Any, device: torch.device) -> torch.Tensor:
+        # The HF text encoder works on raw SMILES strings or precomputed tensors.
         if isinstance(lang, torch.Tensor):
             return self.input_proj(lang.view(lang.size(0), -1).float())
 
@@ -248,12 +226,10 @@ class LanguageEncoder(nn.Module):
         else:
             texts = ["" if lang is None else str(lang)]
 
-        if self.chemberta_tokenizer is None or self.chemberta_model is None or self.chemberta_proj is None:
-            raise RuntimeError("ChemBERTa encoder is not initialized")
+        if self.text_tokenizer is None or self.text_model is None or self.text_proj is None:
+            raise RuntimeError("Text encoder is not initialized")
 
-        texts = _smiles_to_selfies_texts(texts)
-
-        encoded = self.chemberta_tokenizer(
+        encoded = self.text_tokenizer(
             texts,
             padding=True,
             truncation=True,
@@ -261,17 +237,17 @@ class LanguageEncoder(nn.Module):
             return_tensors="pt",
         )
         encoded = {key: value.to(device) for key, value in encoded.items()}
-        outputs = self.chemberta_model(**encoded)
+        outputs = self.text_model(**encoded)
         hidden_states = outputs.last_hidden_state
         attention_mask = encoded["attention_mask"].unsqueeze(-1).type_as(hidden_states)
         pooled = (hidden_states * attention_mask).sum(dim=1) / attention_mask.sum(dim=1).clamp_min(1.0)
-        return self.chemberta_proj(pooled)
+        return self.text_proj(pooled)
 
     def forward(self, lang: Optional[Any], batch_size: int, device: torch.device) -> torch.Tensor:
         if not self.use_language or lang is None:
             return torch.zeros(batch_size, self.hidden_dim, device=device)
 
-        lang_state = self._pool_chemberta(lang, device)
+        lang_state = self._pool_text_backbone(lang, device)
         for layer in self.layers:
             lang_state = layer(lang_state)
             lang_state = self.dropout(lang_state)

@@ -27,6 +27,7 @@ class MultimodalModel(nn.Module):
         use_language: bool = True,
         language_model_name: str = "seyonec/ChemBERTa-zinc-base-v1",
         freeze_language_backbone: bool = True,
+        trust_remote_code: bool = False,
         use_decoder: bool = False,
         decoder_vocab_size: int | None = None,
         decoder_pad_idx: int = 0,
@@ -64,6 +65,7 @@ class MultimodalModel(nn.Module):
             use_language=self.use_language,
             language_model_name=language_model_name,
             freeze_language_backbone=freeze_language_backbone,
+            trust_remote_code=trust_remote_code,
         )
 
         self.decoder = None
@@ -199,6 +201,7 @@ def build_model_from_args(args) -> MultimodalModel:
         use_language=args.use_language,
         language_model_name=getattr(args, "language_model_name", "DeepChem/ChemBERTa-77M-MLM"),
         freeze_language_backbone=getattr(args, "freeze_language_backbone", True),
+        trust_remote_code=getattr(args, "trust_remote_code", False),
         use_decoder=getattr(args, "use_decoder", False),
         decoder_vocab_size=getattr(args, "decoder_vocab_size", None),
         decoder_pad_idx=getattr(args, "decoder_pad_idx", 0),
