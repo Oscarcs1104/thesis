@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from torch_geometric.data import Batch as GeomBatch
 
-try:
-    from .data import HybridGraphLangDataset, load_graph_dataset, load_language_features
-    from .model import build_model_from_args
-    from .smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
-except Exception:  # pragma: no cover
-    from data import HybridGraphLangDataset, load_graph_dataset, load_language_features
-    from model import build_model_from_args
-    from smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset, load_language_features
+from model.model import build_model_from_args
+from model.smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,20 +137,16 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
     for batch in loader:
         batch = batch.to(device)
         optimizer.zero_grad(set_to_none=True)
-        if use_decoder:
+        if use_decoder and training_mode in {"decoder", "joint"}:
             smiles = getattr(batch, "smiles", None)
             if smiles is None:
                 raise ValueError("Decoder training needs batch.smiles")
             decoder_inputs, decoder_targets = encode_smiles_batch(smiles, decoder_vocab, decoder_max_len, device)
             property_values = batch.y.float().unsqueeze(-1) if batch.y.dim() == 1 else batch.y.float()
-            if training_mode == "predictor":
-                logits = model(batch, property_values=property_values)
-                targets = batch.y.float().view_as(logits)
-                loss = criterion(logits, targets)
-            elif training_mode == "decoder":
+            if training_mode == "decoder":
                 _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
                 loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
-            else:
+            else:  # joint
                 prop_logits, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
                 prop_loss = criterion(prop_logits, batch.y.float().view_as(prop_logits))
                 dec_loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
@@ -244,7 +240,12 @@ def main() -> None:
             print(f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f}")
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
-            best_state = {"model_state_dict": model.state_dict(), "epoch": epoch}
+            best_state = {
+                "model_state_dict": model.state_dict(),
+                "epoch": epoch,
+                "args": vars(args),
+                "decoder_vocab": decoder_vocab,
+            }
             checkpoint_path = Path(args.checkpoint_path) if args.checkpoint_path else Path("checkpoints") / "best.pt"
             checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, checkpoint_path)

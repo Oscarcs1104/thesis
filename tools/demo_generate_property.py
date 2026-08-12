@@ -7,16 +7,12 @@ from pathlib import Path
 
 import torch
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-try:
-    from convert_smiles_to_pyg import smiles_to_data
-    from model import build_model_from_args
-except Exception:  # pragma: no cover
-    from .convert_smiles_to_pyg import smiles_to_data
-    from .model import build_model_from_args
+from data_pipeline.convert_smiles_to_pyg import smiles_to_data
+from model.model import build_model_from_args
 
 
 def build_model(checkpoint_path: str, device: str):

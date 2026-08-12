@@ -17,7 +17,7 @@ END_TOKEN = "<END>"
 UNK_TOKEN = "<OTHER>"
 
 
-def _to_tokens(text: str) -> List[str]:
+def tokenize_molecule(text: str) -> List[str]:
     """Split one molecule string into simple tokens."""
     # Prefer SELFIES tokens when possible.
     text = "" if text is None else str(text).strip()
@@ -39,7 +39,7 @@ def build_vocab(texts: Sequence[str]) -> Dict[str, Dict[str, int]]:
     # Reserve the special tokens first.
     tokens = {PAD_TOKEN, START_TOKEN, END_TOKEN, UNK_TOKEN}
     for text in texts:
-        tokens.update(_to_tokens(text))
+        tokens.update(tokenize_molecule(text))
 
     ordered_tokens = [PAD_TOKEN, START_TOKEN, END_TOKEN, UNK_TOKEN] + sorted(t for t in tokens if t not in {PAD_TOKEN, START_TOKEN, END_TOKEN, UNK_TOKEN})
     token_to_id = {token: index for index, token in enumerate(ordered_tokens)}
@@ -68,7 +68,7 @@ def encode_batch(texts: Sequence[str], vocab: Dict[str, Dict[str, int]], max_len
 
     for text in texts:
         token_ids = [start_idx]
-        for token in _to_tokens(text):
+        for token in tokenize_molecule(text):
             token_ids.append(token_to_id.get(token, unk_idx))
         token_ids.append(end_idx)
 
