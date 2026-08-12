@@ -1,14 +1,12 @@
-# Hybrid MoLA + MolPROP
+# Graph + SELFIES Multimodal Property Predictor
 
-This folder contains a standalone hybrid molecular model that:
+This folder contains a standalone multimodal molecular model that:
 
 - uses a graph encoder with selectable backbone: `gcn`, `gat`, `gatv2`, or `gin`
-- uses a language branch driven by dense embeddings from `molformer` or `chemberta`
+- uses a language branch (ChemBERTa) driven by the molecule's SELFIES representation
+- fuses both branches by concatenation, then predicts the target property with an MLP head
 - can disable the language branch entirely with `--no-use-language`
-- supports three fusion modes:
-  - `mola`: layerwise cross-attention fusion inspired by MoLA
-  - `concat`: direct concatenation of graph and language features
-  - `molprop`: gated fusion inspired by MolPROP
+- optionally trains a SELFIES decoder to generate new, valid molecules conditioned on the fused representation and a target property
 
 ## Folder layout
 
@@ -32,8 +30,7 @@ Each graph should provide:
 - `x`: node features
 - `edge_index`: graph connectivity
 - `y`: target property
-- `smiles` optional: SMILES string, required for the SELFIES decoder (`--use-decoder`)
-- `lang` optional: one dense embedding vector per graph (only used when `--language-backbone` is not `chemberta`)
+- `smiles` optional: SMILES string. Used by the ChemBERTa language branch (converted to SELFIES internally) and required for the SELFIES decoder (`--use-decoder`)
 
 If `x` contains categorical node indices like MolPROP, keep `--node-encoding categorical` and use the correct `--node-vocab-sizes`.
 
@@ -47,7 +44,6 @@ python training/train.py \
   --task regression \
   --graph-backbone gatv2 \
   --language-backbone chemberta \
-  --fusion concat \
   --use-language \
   --hidden-dim 256 \
   --num-layers 3 \

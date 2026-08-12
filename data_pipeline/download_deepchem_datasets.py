@@ -31,7 +31,7 @@ ALL_DATASETS = list(CLASSIFICATION_LOADERS.keys()) + list(REGRESSION_LOADERS.key
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download DeepChem MoleculeNet datasets into the hybrid MoLA + MolPROP folder"
+        description="Download DeepChem MoleculeNet datasets into this project's data folder"
     )
     parser.add_argument(
         "--datasets",
@@ -71,7 +71,7 @@ def _load_deepchem_module():
         import deepchem as dc  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
-            "deepchem is not installed in the active environment. Install it first or run inside the MoLA environment."
+            "deepchem is not installed in the active environment. Install it first or run inside the project's environment."
         ) from exc
     return dc
 

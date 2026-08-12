@@ -227,28 +227,6 @@ def convert_deepchem_featurized_to_pyg(root: Path) -> list[Data]:
     return data_list
 
 
-def load_language_features(path: Optional[str]) -> Optional[torch.Tensor]:
-    if not path:
-        return None
-
-    feature_path = Path(path)
-    if not feature_path.exists():
-        raise FileNotFoundError(f"Language feature file not found: {path}")
-
-    if feature_path.suffix.lower() == ".npy":
-        return torch.from_numpy(np.load(feature_path)).float()
-
-    loaded = _torch_load(feature_path)
-    if isinstance(loaded, torch.Tensor):
-        return loaded.float()
-    if isinstance(loaded, np.ndarray):
-        return torch.from_numpy(loaded).float()
-    if isinstance(loaded, dict) and "lang" in loaded:
-        return torch.as_tensor(loaded["lang"]).float()
-
-    raise ValueError("Unsupported language feature format. Use .pt, .pth or .npy")
-
-
 def load_graph_dataset(path: str) -> list[Data]:
     raw_path = str(path).strip()
     if not raw_path:
@@ -405,14 +383,8 @@ def load_graph_dataset(path: str) -> list[Data]:
 
 
 class HybridGraphLangDataset(Dataset):
-    def __init__(self, graphs: Sequence[Data], language_features: Optional[torch.Tensor] = None) -> None:
+    def __init__(self, graphs: Sequence[Data]) -> None:
         self.graphs = list(graphs)
-        self.language_features = language_features
-
-        if self.language_features is not None and len(self.language_features) != len(self.graphs):
-            raise ValueError(
-                f"Language features length {len(self.language_features)} does not match graphs length {len(self.graphs)}"
-            )
 
     def __len__(self) -> int:
         return len(self.graphs)
@@ -421,10 +393,7 @@ class HybridGraphLangDataset(Dataset):
         graph = self.graphs[index]
         # normalize stored graph on access to ensure PyG-compatible types
         graph = _ensure_edge_index_and_types(graph)
-        graph = graph.clone()
-        if self.language_features is not None:
-            graph.lang = self.language_features[index]
-        return graph
+        return graph.clone()
 
 
 def _ensure_edge_index_and_types(graph: Data) -> Data:

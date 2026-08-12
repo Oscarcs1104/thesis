@@ -13,19 +13,14 @@ except Exception:
     from smiles_decoder import SmilesDecoder
 
 
-VALID_FUSIONS = {"concat", "mola", "molprop"}
-
-
 class MultimodalModel(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
         output_dim: int,
         graph_backbone: str = "gatv2",
-        language_backbone: str = "molformer",
-        fusion: str = "mola",
+        language_backbone: str = "chemberta",
         num_layers: int = 3,
-        num_heads: int = 8,
         dropout: float = 0.3,
         node_encoding: str = "categorical",
         node_vocab_sizes: Optional[Sequence[int]] = None,
@@ -41,17 +36,13 @@ class MultimodalModel(nn.Module):
         super().__init__()
 
         graph_backbone = graph_backbone.lower()
-        fusion = fusion.lower()
         if graph_backbone not in VALID_GRAPH_BACKBONES:
             raise ValueError(f"graph_backbone must be one of {sorted(VALID_GRAPH_BACKBONES)}")
-        if fusion not in VALID_FUSIONS:
-            raise ValueError(f"fusion must be one of {sorted(VALID_FUSIONS)}")
 
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.graph_backbone = graph_backbone
         self.language_backbone = language_backbone.lower()
-        self.fusion = fusion
         self.num_layers = num_layers
         self.use_language = use_language and self.language_backbone != "none"
         self.use_decoder = use_decoder
@@ -87,77 +78,35 @@ class MultimodalModel(nn.Module):
                 end_idx=decoder_end_idx,
             )
 
-        if fusion == "mola":
-            self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads)
-            self.layer_weights = nn.Parameter(torch.ones(num_layers * (2 if self.use_language else 1), 1, 1))
-            self.head = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim * 4),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim * 4, output_dim),
-            )
-        elif fusion == "concat":
-            fused_dim = hidden_dim * (2 if self.use_language else 1)
-            self.head = nn.Sequential(
-                nn.Linear(fused_dim, fused_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(fused_dim, output_dim),
-            )
-        else:
-            self.lang_gate = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.Sigmoid(),
-            )
-            fused_dim = hidden_dim * (2 if self.use_language else 1)
-            self.head = nn.Sequential(
-                nn.Linear(fused_dim, fused_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(fused_dim, output_dim),
-            )
-
         fused_dim = hidden_dim * (2 if self.use_language else 1)
+        self.head = nn.Sequential(
+            nn.Linear(fused_dim, fused_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(fused_dim, output_dim),
+        )
+
         self.decoder_condition_proj = nn.Sequential(
             nn.Linear(fused_dim + max(1, output_dim), hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-    def _get_states(self, data: torch.nn.Module) -> Tuple[List[torch.Tensor], torch.Tensor, List[torch.Tensor]]:
+    def _get_states(self, data: torch.nn.Module) -> Tuple[torch.Tensor, torch.Tensor]:
         # Read graph and language inputs once.
         x = data.x
         edge_index = data.edge_index
         batch = data.batch
-        lang = getattr(data, "smiles", None) if self.language_backbone == "chemberta" else getattr(data, "lang", None)
-        if lang is None and self.language_backbone == "chemberta":
-            lang = getattr(data, "lang", None)
+        smiles = getattr(data, "smiles", None)
 
         batch_size = int(batch.max().item()) + 1
         _, layer_graph_states = self.graph_encoder(x, edge_index, batch)
-        lang_state, layer_lang_states = self.language_encoder(lang, batch_size=batch_size, device=x.device)
-        return layer_graph_states, lang_state, layer_lang_states
+        lang_state = self.language_encoder(smiles, batch_size=batch_size, device=x.device)
+        return layer_graph_states[-1], lang_state
 
     def encode(self, data: torch.nn.Module) -> torch.Tensor:
-        layer_graph_states, lang_state, layer_lang_states = self._get_states(data)
-
-        if self.fusion == "concat":
-            return torch.cat([layer_graph_states[-1], lang_state], dim=-1) if self.use_language else layer_graph_states[-1]
-
-        if self.fusion == "molprop":
-            if self.use_language:
-                return torch.cat([layer_graph_states[-1] * self.lang_gate(lang_state), lang_state], dim=-1)
-            return layer_graph_states[-1]
-
-        tokens: List[torch.Tensor] = []
-        for graph_state, lang_state_per_layer in zip(layer_graph_states, layer_lang_states):
-            tokens.append(graph_state)
-            if self.use_language:
-                tokens.append(lang_state_per_layer)
-
-        fused_all = torch.stack(tokens, dim=0)
-        attn_out, _ = self.cross_attention(fused_all, fused_all, fused_all)
-        return (attn_out * self.layer_weights).sum(dim=0)
+        graph_state, lang_state = self._get_states(data)
+        return torch.cat([graph_state, lang_state], dim=-1) if self.use_language else graph_state
 
     def _build_decoder_latent(self, fused_feat: torch.Tensor, property_values: Optional[torch.Tensor] = None) -> torch.Tensor:
         if property_values is None:
@@ -182,25 +131,7 @@ class MultimodalModel(nn.Module):
         return self.decoder_condition_proj(cond_input)
 
     def forward(self, data: torch.nn.Module, decoder_input_ids: Optional[torch.Tensor] = None, return_aux: bool = False, property_values: Optional[torch.Tensor] = None):
-        layer_graph_states, lang_state, layer_lang_states = self._get_states(data)
-
-        layer_weights = None
-        attn_map = None
-
-        if self.fusion == "concat":
-            fused_feat = torch.cat([layer_graph_states[-1], lang_state], dim=-1) if self.use_language else layer_graph_states[-1]
-        elif self.fusion == "molprop":
-            fused_feat = torch.cat([layer_graph_states[-1] * self.lang_gate(lang_state), lang_state], dim=-1) if self.use_language else layer_graph_states[-1]
-        else:
-            tokens: List[torch.Tensor] = []
-            for graph_state, lang_state_per_layer in zip(layer_graph_states, layer_lang_states):
-                tokens.append(graph_state)
-                if self.use_language:
-                    tokens.append(lang_state_per_layer)
-            fused_all = torch.stack(tokens, dim=0)
-            attn_out, attn_map = self.cross_attention(fused_all, fused_all, fused_all)
-            fused_feat = (attn_out * self.layer_weights).sum(dim=0)
-            layer_weights = self.layer_weights.view(-1, 1, 1)
+        fused_feat = self.encode(data)
 
         logits = self.head(fused_feat)
         decoder_latent = self._build_decoder_latent(fused_feat, property_values=property_values)
@@ -210,10 +141,6 @@ class MultimodalModel(nn.Module):
             return (logits, decoder_logits) if decoder_logits is not None else logits
 
         result = {"fused": fused_feat, "logits": logits}
-        if layer_weights is not None:
-            result["layer_weights"] = layer_weights
-        if attn_map is not None:
-            result["attention"] = attn_map
         if decoder_logits is not None:
             result["decoder_logits"] = decoder_logits
         return result
@@ -265,9 +192,7 @@ def build_model_from_args(args) -> MultimodalModel:
         output_dim=args.output_dim,
         graph_backbone=args.graph_backbone,
         language_backbone=args.language_backbone,
-        fusion=args.fusion,
         num_layers=args.num_layers,
-        num_heads=args.num_heads,
         dropout=args.dropout,
         node_encoding=args.node_encoding,
         node_vocab_sizes=args.node_vocab_sizes,

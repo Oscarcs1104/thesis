@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset, load_language_features
+from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset
 from model.model import build_model_from_args
 from model.smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
 
@@ -23,16 +23,13 @@ from model.smiles_decoder import build_vocab as build_smiles_vocab, encode_batch
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the thesis multimodal predictor")
     parser.add_argument("--data-path", type=str, required=True)
-    parser.add_argument("--lang-path", type=str, default=None)
     parser.add_argument("--task", type=str, default="regression", choices=["regression", "binary"])
     parser.add_argument("--output-dim", type=int, default=1)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-layers", type=int, default=3)
-    parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gatv2", choices=["gcn", "gat", "gatv2", "gin"])
-    parser.add_argument("--language-backbone", type=str, default="chemberta", choices=["molformer", "chemberta", "none"])
-    parser.add_argument("--fusion", type=str, default="concat", choices=["concat", "mola", "molprop"])
+    parser.add_argument("--language-backbone", type=str, default="chemberta", choices=["chemberta", "none"])
     parser.add_argument("--use-language", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
     parser.add_argument("--node-vocab-sizes", type=int, nargs="*", default=[119, 4])
@@ -176,8 +173,7 @@ def main() -> None:
     torch.set_num_threads(1)
 
     dataset = load_graph_dataset(args.data_path)
-    language_features = None if args.language_backbone == "chemberta" else load_language_features(args.lang_path)
-    dataset = HybridGraphLangDataset(dataset, language_features)
+    dataset = HybridGraphLangDataset(dataset)
     train_set, val_set, test_set = split_dataset(dataset, args.train_ratio, args.val_ratio, args.test_ratio, args.seed)
 
     decoder_vocab = None
