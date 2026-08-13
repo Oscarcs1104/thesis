@@ -1,0 +1,40 @@
+# Dependencies for the graph + SELFIES multimodal property predictor.
+# Verified against the "thesis" conda environment (Windows, CUDA 12.4) plus the
+# packages this project imports that were missing from it (see notes below).
+#
+# --- Step 1: PyTorch + CUDA (must be installed with the CUDA-specific index, not plain PyPI) ---
+#   pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+#
+# --- Step 2: PyTorch Geometric + its compiled extensions (also need a special wheel index) ---
+#   pip install torch-geometric==2.8.0.post1
+#   pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
+#
+# --- Step 3: everything else in this file ---
+#   pip install -r requirements.txt
+
+# HuggingFace stack (language encoder: ChemBERTa, MoLFormer, or any compatible repo)
+transformers==5.15.0
+huggingface_hub==1.27.0
+tokenizers==0.22.2
+safetensors==0.8.0
+sentencepiece==0.2.2
+
+# Chemistry / molecule handling
+rdkit==2026.3.5
+selfies>=2.1.1          # REQUIRED for real SELFIES tokenization in the decoder.
+                        # Missing from the "thesis" env today -- without it, tokenize_molecule()
+                        # silently falls back to raw character tokenization (no validity guarantee).
+
+# Numerics (also required transitively by torch-geometric)
+numpy==2.4.4
+scipy==1.17.1
+networkx==3.6.1
+
+# Plotting / reporting (used by tools/ploting.py) -- also missing from "thesis" today
+pandas==2.3.3
+matplotlib==3.10.8
+
+# --- Optional, only needed for specific scripts ---
+# accelerate            # only if you load a HF model with device_map="auto"
+# deepchem               # only for data_pipeline/download_deepchem_datasets.py
+# pytest                 # only to run tools/test_data_loader.py as a formal test
