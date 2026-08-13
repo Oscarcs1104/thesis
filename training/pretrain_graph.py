@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from data_pipeline.data import load_graph_dataset
 from model.encoders import GraphEncoder
+from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
 
 
 def _print_progress(prefix: str, current: int, total: int, start_time: float) -> None:
@@ -102,6 +103,7 @@ def train_graph(
     device: str = "cpu",
     batch_size: int = 64,
     node_encoding: str = "dense",
+    wandb_run=None,
 ) -> None:
     encoder = GraphEncoder(hidden_dim=hidden_dim, graph_backbone=graph_backbone, num_layers=num_layers, dropout=dropout, node_encoding=node_encoding)
     trainer = GraphPretrainer(encoder=encoder, hidden_dim=hidden_dim, proj_dim=128, device=device)
@@ -110,8 +112,10 @@ def train_graph(
         loss = trainer.train_epoch(graphs, batch_size=batch_size, on_batch_end=lambda current, total: _print_progress(f"Graph epoch {epoch}/{epochs}", current, total, start))
         _print_progress(f"Graph epoch {epoch}/{epochs}", 1, 1, start)
         print(f" | loss={loss:.4f}")
+        wandb_log(wandb_run, {"train/loss": loss}, step=epoch)
     torch.save({"stage": "graph", "graph_encoder": encoder.state_dict()}, out)
     print(f"Saved graph pretrain to {out}")
+    wandb_finish(wandb_run)
 
 
 def parse_args() -> argparse.Namespace:
@@ -126,12 +130,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gatv2", choices=["gcn", "gat", "gatv2", "gin"])
     parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
+    add_wandb_args(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     graphs = load_graph_dataset(args.data_path)
+    wandb_run = wandb_init(args, config=vars(args))
     train_graph(
         graphs,
         args.out,
@@ -143,6 +149,7 @@ def main() -> None:
         device=args.device,
         batch_size=args.batch_size,
         node_encoding=args.node_encoding,
+        wandb_run=wandb_run,
     )
 
 

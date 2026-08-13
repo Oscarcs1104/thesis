@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from model.smiles_decoder import build_vocab, tokenize_molecule
+from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
 
 
 def _build_mlm_vocab(texts) -> dict:
@@ -60,6 +61,7 @@ def train_selfies(
     hidden_dim: int = 256,
     max_len: int = 128,
     max_vocab_samples: int = 20000,
+    wandb_run=None,
 ) -> None:
     path = Path(smiles_file)
     with path.open("r", encoding="utf-8") as handle:
@@ -95,7 +97,9 @@ def train_selfies(
             num_batches += 1
 
         elapsed = int(time.time() - start)
-        print(f"SELFIES epoch {epoch}/{epochs} | loss={total_loss / max(1, num_batches):.4f} | elapsed {elapsed}s")
+        epoch_loss = total_loss / max(1, num_batches)
+        print(f"SELFIES epoch {epoch}/{epochs} | loss={epoch_loss:.4f} | elapsed {elapsed}s")
+        wandb_log(wandb_run, {"train/loss": epoch_loss}, step=epoch)
 
     torch.save(
         {
@@ -108,6 +112,7 @@ def train_selfies(
         out,
     )
     print(f"Saved SELFIES pretrain to {out}")
+    wandb_finish(wandb_run)
 
 
 def parse_args() -> argparse.Namespace:
@@ -120,11 +125,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--max-len", type=int, default=128)
     parser.add_argument("--max-vocab-samples", type=int, default=20000, help="Cap on lines used to build the token vocabulary")
+    add_wandb_args(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    wandb_run = wandb_init(args, config=vars(args))
     train_selfies(
         args.smiles_file,
         args.out,
@@ -134,6 +141,7 @@ def main() -> None:
         hidden_dim=args.hidden_dim,
         max_len=args.max_len,
         max_vocab_samples=args.max_vocab_samples,
+        wandb_run=wandb_run,
     )
 
 

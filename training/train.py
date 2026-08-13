@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset
 from model.model import build_model_from_args
 from model.smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
+from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--training-mode", type=str, default="predictor", choices=["predictor", "joint", "decoder"])
     parser.add_argument("--decoder-loss-weight", type=float, default=0.5)
     parser.add_argument("--decoder-max-len", type=int, default=96)
+    add_wandb_args(parser)
     return parser.parse_args()
 
 
@@ -231,6 +233,8 @@ def main() -> None:
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
     target_range = _dataset_target_range(dataset)
 
+    wandb_run = wandb_init(args, config=vars(args))
+
     best_val = float("inf")
     best_state = None
     for epoch in range(1, args.epochs + 1):
@@ -242,6 +246,11 @@ def main() -> None:
             print(f"Epoch {epoch:03d} | train_decoder_loss={train_metrics['loss']:.4f} | val_decoder_loss={val_metrics['loss']:.4f}")
         else:
             print(f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f}")
+        wandb_log(
+            wandb_run,
+            {**{f"train/{k}": v for k, v in train_metrics.items()}, **{f"val/{k}": v for k, v in val_metrics.items()}},
+            step=epoch,
+        )
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
             best_state = {
@@ -264,6 +273,8 @@ def main() -> None:
         print(f"Test decoder loss={test_metrics['loss']:.4f}")
     else:
         print(f"Test loss={test_metrics['loss']:.4f}")
+    wandb_log(wandb_run, {f"test/{k}": v for k, v in test_metrics.items()})
+    wandb_finish(wandb_run)
 
 
 if __name__ == "__main__":
