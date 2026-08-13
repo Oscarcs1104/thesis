@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import os
+import csv
 import sys
 from pathlib import Path
 
 import torch
+from rdkit import Chem
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -13,6 +14,57 @@ if str(ROOT) not in sys.path:
 
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data
 from model.model import build_model_from_args
+
+# (relative CSV path, target property column)
+_DATASET_FILES = {
+    "esol": ("data/esol.csv", "logSolubility"),
+    "freesolv": ("data/freesolv.csv", "freesolv"),
+    "lipo": ("data/lipo.csv", "lipo"),
+}
+
+
+def _canonical_smiles(smiles: str) -> str | None:
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    return Chem.MolToSmiles(mol, canonical=True)
+
+
+def _lookup_real_property(smiles: str) -> list[tuple[str, str, float]]:
+    """Search esol/freesolv/lipo for this exact molecule and return its real label(s)."""
+    canonical_input = _canonical_smiles(smiles)
+    matches: list[tuple[str, str, float]] = []
+    for dataset_name, (rel_path, column) in _DATASET_FILES.items():
+        csv_path = ROOT / rel_path
+        if not csv_path.exists():
+            continue
+        with csv_path.open("r", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                row_smiles = row.get("smiles")
+                if row_smiles is None:
+                    continue
+                is_match = row_smiles == smiles or (
+                    canonical_input is not None and _canonical_smiles(row_smiles) == canonical_input
+                )
+                if not is_match:
+                    continue
+                try:
+                    matches.append((dataset_name, column, float(row[column])))
+                except (TypeError, ValueError):
+                    pass
+                break
+    return matches
+
+
+def _predict_property(model, smiles: str, device) -> float | None:
+    data = smiles_to_data(smiles)
+    if data is None:
+        return None
+    data.batch = torch.zeros(data.num_nodes, dtype=torch.long)
+    data = data.to(device)
+    with torch.no_grad():
+        logits = model(data)
+    return float(logits.squeeze(-1).cpu().item())
 
 
 def build_model(checkpoint_path: str, device: str):
@@ -95,6 +147,13 @@ def main() -> None:
     print(f"Input SMILES: {args.smiles}")
     print(f"Predicted property: {pred:.4f}")
 
+    real_matches = _lookup_real_property(args.smiles)
+    if real_matches:
+        for dataset_name, column, value in real_matches:
+            print(f"Real value ({dataset_name}, column '{column}'): {value:.4f}")
+    else:
+        print("Real value: molecule not found in esol/freesolv/lipo")
+
     property_values = None
     if args.property_values is not None:
         property_values = torch.tensor([args.property_values], dtype=torch.float, device=device)
@@ -112,9 +171,25 @@ def main() -> None:
         property_values=property_values,
     )
 
-    print("Generated candidates:")
+    canonical_input = _canonical_smiles(args.smiles)
+    seen_candidates: set[str] = set()
+
+    print("Generated candidates (different molecules targeting a similar property):")
     for idx, candidate in enumerate(candidates, start=1):
-        print(f"{idx:02d}. {candidate}")
+        canonical_candidate = _canonical_smiles(candidate)
+        if canonical_candidate is None:
+            print(f"{idx:02d}. {candidate}  [INVALID, RDKit could not parse it]")
+            continue
+        if canonical_candidate == canonical_input:
+            print(f"{idx:02d}. {candidate}  [same molecule as the input]")
+            continue
+        if canonical_candidate in seen_candidates:
+            print(f"{idx:02d}. {candidate}  [duplicate of another candidate]")
+            continue
+        seen_candidates.add(canonical_candidate)
+        candidate_pred = _predict_property(model, candidate, device)
+        pred_str = f"{candidate_pred:.4f}" if candidate_pred is not None else "N/A"
+        print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}")
 
 
 if __name__ == "__main__":
