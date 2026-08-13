@@ -248,6 +248,11 @@ def main() -> None:
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
         if args.use_decoder and args.training_mode == "decoder":
             print(f"Epoch {epoch:03d} | train_decoder_loss={train_metrics['loss']:.4f} | val_decoder_loss={val_metrics['loss']:.4f}")
+        elif "nrmse" in train_metrics:
+            print(
+                f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f} "
+                f"| train_nrmse={train_metrics['nrmse']:.4f} | val_nrmse={val_metrics['nrmse']:.4f}"
+            )
         else:
             print(f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f}")
         wandb_log(
@@ -275,6 +280,8 @@ def main() -> None:
     test_metrics = evaluate(model, test_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
     if args.use_decoder and args.training_mode == "decoder":
         print(f"Test decoder loss={test_metrics['loss']:.4f}")
+    elif "nrmse" in test_metrics:
+        print(f"Test loss={test_metrics['loss']:.4f} | Test RMSE={test_metrics['rmse']:.4f} | Test NRMSE={test_metrics['nrmse']:.4f}")
     else:
         print(f"Test loss={test_metrics['loss']:.4f}")
     wandb_log(wandb_run, {f"test/{k}": v for k, v in test_metrics.items()})
