@@ -132,6 +132,7 @@ def train_graph(
         _print_progress(f"Graph epoch {epoch}/{epochs}", 1, 1, start)
         print(f" | loss={loss:.4f}")
         wandb_log(wandb_run, {"train/loss": loss}, step=epoch)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
     torch.save({"stage": "graph", "graph_encoder": encoder.state_dict()}, out)
     print(f"Saved graph pretrain to {out}")
     wandb_finish(wandb_run)

@@ -126,6 +126,7 @@ def train_selfies(
         print(f"SELFIES epoch {epoch}/{epochs} | loss={epoch_loss:.4f} | elapsed {elapsed}s")
         wandb_log(wandb_run, {"train/loss": epoch_loss}, step=epoch)
 
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "stage": "selfies_lm",
