@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
 from torch_geometric.data import Batch as GeomBatch
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,23 +35,34 @@ def _print_progress(prefix: str, current: int, total: int, start_time: float) ->
     print(f"{prefix} [{bar}] {100.0 * current / total:5.1f}% | elapsed {clock}", end="\r", flush=True)
 
 
-def _graph_views(graphs, device: torch.device):
-    batch_graphs = [g.clone() for g in graphs]
-    view_1 = []
-    view_2 = []
-    for graph in batch_graphs:
-        g1 = graph.clone()
-        g2 = graph.clone()
-        if getattr(g1, "edge_index", None) is not None and g1.edge_index.numel() > 0:
-            mask = torch.rand(g1.edge_index.size(1)) >= 0.15
-            g1.edge_index = g1.edge_index[:, mask]
-            g2.edge_index = g2.edge_index[:, mask]
-        if getattr(g1, "x", None) is not None:
-            g1.x = g1.x + torch.randn_like(g1.x) * 0.01
-            g2.x = g2.x + torch.randn_like(g2.x) * 0.01
-        view_1.append(g1)
-        view_2.append(g2)
-    return GeomBatch.from_data_list(view_1).to(device), GeomBatch.from_data_list(view_2).to(device)
+def _augment_view(graph):
+    view = graph.clone()
+    if getattr(view, "edge_index", None) is not None and view.edge_index.numel() > 0:
+        mask = torch.rand(view.edge_index.size(1)) >= 0.15
+        view.edge_index = view.edge_index[:, mask]
+    if getattr(view, "x", None) is not None:
+        view.x = view.x + torch.randn_like(view.x) * 0.01
+    return view
+
+
+class ContrastiveGraphDataset(Dataset):
+    """Produces two augmented views per graph; the actual augmentation work happens
+    inside __getitem__ so DataLoader workers can parallelize it across CPUs."""
+
+    def __init__(self, graphs) -> None:
+        self.graphs = graphs
+
+    def __len__(self) -> int:
+        return len(self.graphs)
+
+    def __getitem__(self, idx: int):
+        graph = self.graphs[idx]
+        return _augment_view(graph), _augment_view(graph)
+
+
+def _collate_views(pairs):
+    view_1, view_2 = zip(*pairs)
+    return GeomBatch.from_data_list(list(view_1)), GeomBatch.from_data_list(list(view_2))
 
 
 class GraphPretrainer:
@@ -71,15 +83,13 @@ class GraphPretrainer:
         sim.masked_fill_(mask, -9e15)
         return F.cross_entropy(sim, targets)
 
-    def train_epoch(self, graphs, batch_size: int, on_batch_end=None) -> float:
+    def train_epoch(self, loader: DataLoader, on_batch_end=None) -> float:
         self.encoder.train()
         total_loss = 0.0
-        n = len(graphs)
-        perm = torch.randperm(n)
-        total_batches = max((n + batch_size - 1) // batch_size, 1)
-        for step, start in enumerate(range(0, n, batch_size), start=1):
-            batch_graphs = [graphs[idx] for idx in perm[start:start + batch_size].tolist()]
-            view_1, view_2 = _graph_views(batch_graphs, self.device)
+        total_batches = len(loader)
+        for step, (view_1, view_2) in enumerate(loader, start=1):
+            view_1 = view_1.to(self.device)
+            view_2 = view_2.to(self.device)
             _, states_1 = self.encoder(view_1.x, view_1.edge_index, view_1.batch)
             _, states_2 = self.encoder(view_2.x, view_2.edge_index, view_2.batch)
             loss = self._nt_xent(self.proj(states_1[-1]), self.proj(states_2[-1]))
@@ -103,13 +113,22 @@ def train_graph(
     device: str = "cpu",
     batch_size: int = 64,
     node_encoding: str = "dense",
+    num_workers: int = 0,
     wandb_run=None,
 ) -> None:
     encoder = GraphEncoder(hidden_dim=hidden_dim, graph_backbone=graph_backbone, num_layers=num_layers, dropout=dropout, node_encoding=node_encoding)
     trainer = GraphPretrainer(encoder=encoder, hidden_dim=hidden_dim, proj_dim=128, device=device)
+    loader = DataLoader(
+        ContrastiveGraphDataset(graphs),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+        collate_fn=_collate_views,
+    )
     for epoch in range(1, epochs + 1):
         start = time.time()
-        loss = trainer.train_epoch(graphs, batch_size=batch_size, on_batch_end=lambda current, total: _print_progress(f"Graph epoch {epoch}/{epochs}", current, total, start))
+        loss = trainer.train_epoch(loader, on_batch_end=lambda current, total: _print_progress(f"Graph epoch {epoch}/{epochs}", current, total, start))
         _print_progress(f"Graph epoch {epoch}/{epochs}", 1, 1, start)
         print(f" | loss={loss:.4f}")
         wandb_log(wandb_run, {"train/loss": loss}, step=epoch)
@@ -124,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=str, default="graph_pretrain.pt")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--num-workers", type=int, default=0, help="Parallel CPU processes for batch loading (e.g. 4 if your machine has 4 CPUs)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-layers", type=int, default=3)
@@ -149,6 +169,7 @@ def main() -> None:
         device=args.device,
         batch_size=args.batch_size,
         node_encoding=args.node_encoding,
+        num_workers=args.num_workers,
         wandb_run=wandb_run,
     )
 

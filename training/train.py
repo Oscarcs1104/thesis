@@ -9,7 +9,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch_geometric.data import Batch as GeomBatch
+from torch_geometric.loader import DataLoader as GeomDataLoader
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
     parser.add_argument("--node-vocab-sizes", type=int, nargs="*", default=[119, 4])
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=0, help="Parallel CPU processes for batch loading (e.g. 4 if your machine has 4 CPUs)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -70,12 +71,14 @@ def split_dataset(dataset, train_ratio: float, val_ratio: float, test_ratio: flo
     return torch.utils.data.random_split(dataset, [n_train, n_val, n_test], generator=generator)
 
 
-def iter_graph_batches(dataset, batch_size: int, shuffle: bool):
-    indices = torch.randperm(len(dataset)).tolist() if shuffle else list(range(len(dataset)))
-    for start in range(0, len(indices), batch_size):
-        batch_indices = indices[start:start + batch_size]
-        batch_graphs = [dataset[idx] for idx in batch_indices]
-        yield GeomBatch.from_data_list(batch_graphs)
+def make_loader(dataset, batch_size: int, shuffle: bool, num_workers: int = 0) -> GeomDataLoader:
+    return GeomDataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+    )
 
 
 def _dataset_target_range(dataset) -> tuple[float, float]:
@@ -235,12 +238,13 @@ def main() -> None:
 
     wandb_run = wandb_init(args, config=vars(args))
 
+    train_loader = make_loader(train_set, args.batch_size, shuffle=True, num_workers=args.num_workers)
+    val_loader = make_loader(val_set, args.batch_size, shuffle=False, num_workers=args.num_workers)
+
     best_val = float("inf")
     best_state = None
     for epoch in range(1, args.epochs + 1):
-        train_loader = iter_graph_batches(train_set, args.batch_size, shuffle=True)
         train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len)
-        val_loader = iter_graph_batches(val_set, args.batch_size, shuffle=False)
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
         if args.use_decoder and args.training_mode == "decoder":
             print(f"Epoch {epoch:03d} | train_decoder_loss={train_metrics['loss']:.4f} | val_decoder_loss={val_metrics['loss']:.4f}")
@@ -267,7 +271,7 @@ def main() -> None:
 
     if best_state is not None:
         model.load_state_dict(best_state["model_state_dict"])
-    test_loader = iter_graph_batches(test_set, args.batch_size, shuffle=False)
+    test_loader = make_loader(test_set, args.batch_size, shuffle=False, num_workers=args.num_workers)
     test_metrics = evaluate(model, test_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
     if args.use_decoder and args.training_mode == "decoder":
         print(f"Test decoder loss={test_metrics['loss']:.4f}")
