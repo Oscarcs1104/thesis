@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gatv2", choices=["gcn", "gat", "gatv2", "gin"])
-    parser.add_argument("--language-backbone", type=str, default="chemberta", choices=["chemberta", "none"])
+    parser.add_argument("--language-backbone", type=str, default="huggingface", choices=["huggingface", "none"])
     parser.add_argument("--language-model-name", type=str, default="DeepChem/ChemBERTa-77M-MLM", help="Any HuggingFace text-encoder repo id (e.g. a ChemBERTa or MoLFormer checkpoint)")
     parser.add_argument("--freeze-language-backbone", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers (needed by some HF repos, e.g. MoLFormer)")

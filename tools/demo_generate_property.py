@@ -22,7 +22,7 @@ def build_model(checkpoint_path: str, device: str):
     args.setdefault("hidden_dim", 256)
     args.setdefault("output_dim", 1)
     args.setdefault("graph_backbone", "gin")
-    args.setdefault("language_backbone", "chemberta")
+    args.setdefault("language_backbone", "huggingface")
     args.setdefault("language_model_name", "DeepChem/ChemBERTa-77M-MLM")
     args.setdefault("freeze_language_backbone", True)
     args.setdefault("trust_remote_code", False)

@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GATConv, GATv2Conv, GCNConv, GINConv, global_mean_pool
 
 VALID_GRAPH_BACKBONES = {"gcn", "gat", "gatv2", "gin"}
-VALID_LANGUAGE_BACKBONES = {"chemberta", "none"}
+VALID_LANGUAGE_BACKBONES = {"huggingface", "none"}
 
 
 def _load_text_tokenizer(model_name: str, trust_remote_code: bool):
@@ -189,7 +189,7 @@ class LanguageEncoder(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
-        language_backbone: str = "chemberta",
+        language_backbone: str = "huggingface",
         num_layers: int = 3,
         dropout: float = 0.3,
         use_language: bool = True,

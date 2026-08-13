@@ -1,6 +1,6 @@
 """Masked-LM pretraining over SELFIES tokens.
 
-Independent from train.py's ChemBERTa language branch: this produces a small
+Independent from train.py's HuggingFace language branch: this produces a small
 custom encoder pretrained on molecule tokens, saved with its own vocabulary.
 """
 

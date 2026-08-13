@@ -19,7 +19,7 @@ class MultimodalModel(nn.Module):
         hidden_dim: int,
         output_dim: int,
         graph_backbone: str = "gatv2",
-        language_backbone: str = "chemberta",
+        language_backbone: str = "huggingface",
         num_layers: int = 3,
         dropout: float = 0.3,
         node_encoding: str = "categorical",

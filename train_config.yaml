@@ -13,7 +13,7 @@ hidden-dim: 256
 num-layers: 3
 dropout: 0.3
 graph-backbone: gin
-language-backbone: chemberta
+language-backbone: huggingface
 use-language: true
 
 # Node features
