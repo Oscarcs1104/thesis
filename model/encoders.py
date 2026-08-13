@@ -11,6 +11,34 @@ VALID_GRAPH_BACKBONES = {"gcn", "gat", "gatv2", "gin"}
 VALID_LANGUAGE_BACKBONES = {"chemberta", "none"}
 
 
+def _load_text_tokenizer(model_name: str, trust_remote_code: bool):
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    except OSError:
+        # Some trust_remote_code repos declare a custom tokenizer class (via auto_map)
+        # whose source file doesn't actually exist upstream (seen with
+        # DeepChem/MoLFormer-c3-1.1B, which points at a missing file in
+        # ibm/MoLFormer-XL-both-10pct). Fall back to building a fast tokenizer
+        # straight from the repo's own tokenizer.json, bypassing that broken lookup.
+        import json
+
+        from huggingface_hub import hf_hub_download
+        from transformers import PreTrainedTokenizerFast
+
+        tokenizer_file = hf_hub_download(model_name, "tokenizer.json")
+        special_tokens = {}
+        try:
+            special_file = hf_hub_download(model_name, "special_tokens_map.json")
+            with open(special_file, "r", encoding="utf-8") as handle:
+                raw_special = json.load(handle)
+            special_tokens = {key: (value["content"] if isinstance(value, dict) else value) for key, value in raw_special.items()}
+        except Exception:
+            pass
+        return PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, **special_tokens)
+
+
 def _make_graph_conv(backbone: str, in_dim: int, out_dim: int) -> nn.Module:
     backbone = backbone.lower()
     if backbone == "gcn":
@@ -190,13 +218,13 @@ class LanguageEncoder(nn.Module):
 
         if self.use_language:
             try:
-                from transformers import AutoModel, AutoTokenizer
+                from transformers import AutoModel
             except Exception as exc:  # pragma: no cover - runtime dependency guard
                 raise RuntimeError(
                     "transformers is required for the language branch. Install transformers and sentencepiece."
                 ) from exc
 
-            self.text_tokenizer = AutoTokenizer.from_pretrained(self.language_model_name, trust_remote_code=trust_remote_code)
+            self.text_tokenizer = _load_text_tokenizer(self.language_model_name, trust_remote_code)
             self.text_model = AutoModel.from_pretrained(self.language_model_name, trust_remote_code=trust_remote_code)
             text_hidden = int(getattr(self.text_model.config, "hidden_size", hidden_dim))
             self.text_proj = nn.Linear(text_hidden, hidden_dim)
