@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
-data/
+data/*
+!data/esol.csv
+!data/freesolv.csv
+!data/lipo.csv
+!data/zinc15_250K.csv
 checkpoints/
 wandb/
 *.pt
