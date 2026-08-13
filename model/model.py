@@ -112,22 +112,24 @@ class MultimodalModel(nn.Module):
 
     def _build_decoder_latent(self, fused_feat: torch.Tensor, property_values: Optional[torch.Tensor] = None) -> torch.Tensor:
         if property_values is None:
-            return fused_feat
-
-        prop = property_values.float()
-        if prop.dim() == 0:
-            prop = prop.unsqueeze(0)
-        if prop.dim() == 1:
-            prop = prop.unsqueeze(-1)
-        if prop.size(0) != fused_feat.size(0):
-            if prop.numel() == 1:
-                prop = prop.expand(fused_feat.size(0), -1)
-            else:
-                raise ValueError(f"Property values batch size {prop.size(0)} does not match fused feature batch size {fused_feat.size(0)}")
-        if prop.size(-1) != self.output_dim and self.output_dim == 1:
-            prop = prop.view(-1, 1)
-        elif prop.size(-1) != self.output_dim:
-            raise ValueError(f"Property values have {prop.size(-1)} dims but model expects {self.output_dim}")
+            # Unconditional pretraining (e.g. unlabeled ZINC): pad with a zero placeholder so
+            # decoder_condition_proj still sees its expected fused_dim + max(1, output_dim) width.
+            prop = torch.zeros(fused_feat.size(0), max(1, self.output_dim), device=fused_feat.device, dtype=fused_feat.dtype)
+        else:
+            prop = property_values.float()
+            if prop.dim() == 0:
+                prop = prop.unsqueeze(0)
+            if prop.dim() == 1:
+                prop = prop.unsqueeze(-1)
+            if prop.size(0) != fused_feat.size(0):
+                if prop.numel() == 1:
+                    prop = prop.expand(fused_feat.size(0), -1)
+                else:
+                    raise ValueError(f"Property values batch size {prop.size(0)} does not match fused feature batch size {fused_feat.size(0)}")
+            if prop.size(-1) != self.output_dim and self.output_dim == 1:
+                prop = prop.view(-1, 1)
+            elif prop.size(-1) != self.output_dim:
+                raise ValueError(f"Property values have {prop.size(-1)} dims but model expects {self.output_dim}")
 
         cond_input = torch.cat([fused_feat, prop], dim=-1)
         return self.decoder_condition_proj(cond_input)
