@@ -96,11 +96,23 @@ def _dataset_target_range(dataset) -> tuple[float, float]:
     return (0.0, 0.0) if min_y == float("inf") else (min_y, max_y)
 
 
+def _decoder_token_stats(decoder_logits: torch.Tensor, decoder_targets: torch.Tensor, pad_idx: int) -> tuple[int, int]:
+    mask = decoder_targets != pad_idx
+    if not mask.any():
+        return 0, 0
+    predictions = decoder_logits.argmax(dim=-1)
+    correct = int(((predictions == decoder_targets) & mask).sum().item())
+    total = int(mask.sum().item())
+    return correct, total
+
+
 def evaluate(model, loader, criterion, device, task: str, target_range: tuple[float, float] | None = None, use_decoder: bool = False, training_mode: str = "predictor", decoder_vocab: dict | None = None, decoder_max_len: int = 96):
     model.eval()
     total_loss = 0.0
     total_items = 0
     correct = 0
+    decoder_correct_tokens = 0
+    decoder_total_tokens = 0
     decoder_criterion = nn.CrossEntropyLoss(ignore_index=decoder_vocab["pad_idx"]) if use_decoder and decoder_vocab else None
     with torch.no_grad():
         for batch in loader:
@@ -114,6 +126,9 @@ def evaluate(model, loader, criterion, device, task: str, target_range: tuple[fl
                 property_values = (batch_y.float().unsqueeze(-1) if batch_y.dim() == 1 else batch_y.float()) if batch_y is not None else None
                 _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
                 loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
+                batch_correct, batch_total = _decoder_token_stats(decoder_logits, decoder_targets, decoder_vocab["pad_idx"])
+                decoder_correct_tokens += batch_correct
+                decoder_total_tokens += batch_total
             else:
                 logits = model(batch)
                 targets = batch.y.float().view_as(logits)
@@ -123,9 +138,12 @@ def evaluate(model, loader, criterion, device, task: str, target_range: tuple[fl
             total_loss += loss.item() * batch.num_graphs
             total_items += batch.num_graphs
     metrics = {"loss": total_loss / max(total_items, 1)}
-    if task == "binary" and not (use_decoder and training_mode == "decoder"):
+    if use_decoder and training_mode == "decoder":
+        metrics["token_accuracy"] = decoder_correct_tokens / max(decoder_total_tokens, 1)
+        metrics["perplexity"] = math.exp(min(metrics["loss"], 20))
+    elif task == "binary":
         metrics["accuracy"] = correct / max(total_items, 1)
-    elif not (use_decoder and training_mode == "decoder"):
+    else:
         rmse = math.sqrt(metrics["loss"])
         metrics["rmse"] = rmse
         if target_range is not None and target_range[1] > target_range[0]:
@@ -139,6 +157,8 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
     model.train()
     total_loss = 0.0
     total_items = 0
+    decoder_correct_tokens = 0
+    decoder_total_tokens = 0
     decoder_criterion = nn.CrossEntropyLoss(ignore_index=decoder_vocab["pad_idx"]) if use_decoder and decoder_vocab else None
     for batch in loader:
         batch = batch.to(device)
@@ -161,6 +181,9 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
                 prop_loss = criterion(prop_logits, batch_y.float().view_as(prop_logits))
                 dec_loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
                 loss = prop_loss + decoder_loss_weight * dec_loss
+            batch_correct, batch_total = _decoder_token_stats(decoder_logits, decoder_targets, decoder_vocab["pad_idx"])
+            decoder_correct_tokens += batch_correct
+            decoder_total_tokens += batch_total
         else:
             logits = model(batch)
             targets = batch.y.float().view_as(logits)
@@ -170,7 +193,11 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
         total_loss += loss.item() * batch.num_graphs
         total_items += batch.num_graphs
     metrics = {"loss": total_loss / max(total_items, 1)}
-    if task != "binary":
+    if use_decoder and training_mode in {"decoder", "joint"}:
+        metrics["token_accuracy"] = decoder_correct_tokens / max(decoder_total_tokens, 1)
+    if use_decoder and training_mode == "decoder":
+        metrics["perplexity"] = math.exp(min(metrics["loss"], 20))
+    elif task != "binary":
         rmse = math.sqrt(metrics["loss"])
         metrics["rmse"] = rmse
         if target_range is not None and target_range[1] > target_range[0]:
@@ -247,12 +274,19 @@ def main() -> None:
         train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len)
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
         if args.use_decoder and args.training_mode == "decoder":
-            print(f"Epoch {epoch:03d} | train_decoder_loss={train_metrics['loss']:.4f} | val_decoder_loss={val_metrics['loss']:.4f}")
-        elif "nrmse" in train_metrics:
             print(
+                f"Epoch {epoch:03d} | train_decoder_loss={train_metrics['loss']:.4f} | val_decoder_loss={val_metrics['loss']:.4f} "
+                f"| train_token_acc={train_metrics['token_accuracy']:.4f} | val_token_acc={val_metrics['token_accuracy']:.4f}"
+            )
+        elif "nrmse" in train_metrics:
+            line = (
                 f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f} "
+                f"| train_rmse={train_metrics['rmse']:.4f} | val_rmse={val_metrics['rmse']:.4f} "
                 f"| train_nrmse={train_metrics['nrmse']:.4f} | val_nrmse={val_metrics['nrmse']:.4f}"
             )
+            if "token_accuracy" in train_metrics:
+                line += f" | train_token_acc={train_metrics['token_accuracy']:.4f}"
+            print(line)
         else:
             print(f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f}")
         wandb_log(
@@ -279,7 +313,7 @@ def main() -> None:
     test_loader = make_loader(test_set, args.batch_size, shuffle=False, num_workers=args.num_workers)
     test_metrics = evaluate(model, test_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
     if args.use_decoder and args.training_mode == "decoder":
-        print(f"Test decoder loss={test_metrics['loss']:.4f}")
+        print(f"Test decoder loss={test_metrics['loss']:.4f} | Test token accuracy={test_metrics['token_accuracy']:.4f} | Test perplexity={test_metrics['perplexity']:.4f}")
     elif "nrmse" in test_metrics:
         print(f"Test loss={test_metrics['loss']:.4f} | Test RMSE={test_metrics['rmse']:.4f} | Test NRMSE={test_metrics['nrmse']:.4f}")
     else:
