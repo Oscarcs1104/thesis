@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+    sys.path.append(str(ROOT))
 
 from model.smiles_decoder import build_vocab, tokenize_molecule
 from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
