@@ -105,7 +105,8 @@ def evaluate(model, loader, criterion, device, task: str, target_range: tuple[fl
                 if smiles is None:
                     raise ValueError("Decoder evaluation needs batch.smiles")
                 decoder_inputs, decoder_targets = encode_smiles_batch(smiles, decoder_vocab, decoder_max_len, device)
-                property_values = batch.y.float().unsqueeze(-1) if batch.y.dim() == 1 else batch.y.float()
+                batch_y = getattr(batch, "y", None)
+                property_values = (batch_y.float().unsqueeze(-1) if batch_y.dim() == 1 else batch_y.float()) if batch_y is not None else None
                 _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
                 loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
             else:
@@ -142,13 +143,17 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
             if smiles is None:
                 raise ValueError("Decoder training needs batch.smiles")
             decoder_inputs, decoder_targets = encode_smiles_batch(smiles, decoder_vocab, decoder_max_len, device)
-            property_values = batch.y.float().unsqueeze(-1) if batch.y.dim() == 1 else batch.y.float()
+            batch_y = getattr(batch, "y", None)
+            property_values = (batch_y.float().unsqueeze(-1) if batch_y.dim() == 1 else batch_y.float()) if batch_y is not None else None
             if training_mode == "decoder":
+                # Unconditional pretraining is fine here (e.g. unlabeled ZINC): property_values may be None.
                 _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
                 loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
             else:  # joint
+                if batch_y is None:
+                    raise ValueError("Joint training needs a labeled dataset (batch.y)")
                 prop_logits, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
-                prop_loss = criterion(prop_logits, batch.y.float().view_as(prop_logits))
+                prop_loss = criterion(prop_logits, batch_y.float().view_as(prop_logits))
                 dec_loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
                 loss = prop_loss + decoder_loss_weight * dec_loss
         else:
