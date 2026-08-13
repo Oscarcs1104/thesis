@@ -1,13 +1,18 @@
 # Dependencies for the graph + SELFIES multimodal property predictor.
-# Verified against the "thesis" conda environment (Windows, CUDA 12.4) plus the
-# packages this project imports that were missing from it (see notes below).
+#
+# --- Step 0: check which CUDA build your machine actually needs ---
+#   nvidia-smi   # look at "CUDA Version" in the header -- pick a torch index <= that version
+#   Available PyTorch indices: cu121, cu124, cu126, ... see https://pytorch.org/get-started/locally/
+#   If you don't own the Python install (permission errors writing to site-packages), add --user
+#   to every pip command below, or better, use your own conda env / venv (see README).
 #
 # --- Step 1: PyTorch + CUDA (must be installed with the CUDA-specific index, not plain PyPI) ---
-#   pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cuXXX
 #
 # --- Step 2: PyTorch Geometric + its compiled extensions (also need a special wheel index) ---
-#   pip install torch-geometric==2.8.0.post1
-#   pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
+#   pip install torch-geometric
+#   python -c "import torch; print(torch.__version__)"   # e.g. 2.6.0+cu121
+#   pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-<version-from-above>.html
 #
 # --- Step 3: everything else in this file ---
 #   pip install -r requirements.txt
@@ -21,10 +26,8 @@ sentencepiece==0.2.2
 
 # Chemistry / molecule handling
 rdkit==2026.3.5
-selfies>=2.1.1          # REQUIRED for real SELFIES tokenization in the decoder.
-                        # Missing from the "thesis" env today -- without it, tokenize_molecule()
-                        # silently falls back to raw character tokenization (no validity guarantee).
-
+selfies>=2.1.1          # REQUIRED for SELFIES tokenization in the decoder.
+                        
 # Numerics (also required transitively by torch-geometric)
 numpy==2.4.4
 scipy==1.17.1
