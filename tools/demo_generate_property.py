@@ -6,14 +6,16 @@ import sys
 from pathlib import Path
 
 import torch
-from rdkit import Chem
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from data_pipeline.convert_smiles_to_pyg import canonicalize_smiles as _canonical_smiles
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data
+from data_pipeline.data import load_graph_dataset
 from model.model import build_model_from_args
+from tools.mol_metrics import mean_pairwise_tanimoto, mols_from_smiles, morgan_fingerprints, murcko_scaffold_smiles, nearest_neighbor_similarity, shannon_entropy
 
 # (relative CSV path, target property column)
 _DATASET_FILES = {
@@ -21,13 +23,6 @@ _DATASET_FILES = {
     "freesolv": ("data/freesolv.csv", "freesolv"),
     "lipo": ("data/lipo.csv", "lipo"),
 }
-
-
-def _canonical_smiles(smiles: str) -> str | None:
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return None
-    return Chem.MolToSmiles(mol, canonical=True)
 
 
 def _lookup_real_property(smiles: str) -> list[tuple[str, str, float]]:
@@ -129,6 +124,12 @@ def main() -> None:
     parser.add_argument("--max-len", type=int, default=96)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--reference-data-path",
+        type=str,
+        default=None,
+        help="Optional dataset (same format as train.py --data-path) to check novelty/scaffold overlap of the generated candidates against",
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -173,11 +174,13 @@ def main() -> None:
 
     canonical_input = _canonical_smiles(args.smiles)
     seen_candidates: set[str] = set()
+    num_invalid = 0
 
     print("Generated candidates (different molecules targeting a similar property):")
     for idx, candidate in enumerate(candidates, start=1):
         canonical_candidate = _canonical_smiles(candidate)
         if canonical_candidate is None:
+            num_invalid += 1
             print(f"{idx:02d}. {candidate}  [INVALID, RDKit could not parse it]")
             continue
         if canonical_candidate == canonical_input:
@@ -190,6 +193,49 @@ def main() -> None:
         candidate_pred = _predict_property(model, candidate, device)
         pred_str = f"{candidate_pred:.4f}" if candidate_pred is not None else "N/A"
         print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}")
+
+    _print_generation_metrics(list(seen_candidates), len(candidates), num_invalid, args.reference_data_path)
+
+
+def _print_generation_metrics(canonical_candidates: list[str], num_generated: int, num_invalid: int, reference_data_path: str | None) -> None:
+    print("\n--- Generation metrics ---")
+    print(f"Valid: {num_generated - num_invalid}/{num_generated} ({(num_generated - num_invalid) / max(num_generated, 1):.1%})")
+    print(f"Unique, novel-vs-input candidates: {len(canonical_candidates)}")
+
+    mols, parse_failed = mols_from_smiles(canonical_candidates)
+    if parse_failed:
+        print(f"Warning: {parse_failed} canonical candidates failed to re-parse (unexpected)")
+    if len(mols) < 2:
+        print("Not enough distinct candidates for diversity/scaffold metrics")
+        return
+
+    fps = morgan_fingerprints(mols)
+    mean_sim = mean_pairwise_tanimoto(fps)
+    print(f"Internal diversity (1 - mean pairwise Tanimoto): {1 - mean_sim:.4f}")
+
+    scaffolds = [murcko_scaffold_smiles(mol) for mol in mols]
+    print(f"Unique Murcko scaffolds among candidates: {len(set(scaffolds))}/{len(mols)}")
+    print(f"Shannon entropy over candidate scaffolds: {shannon_entropy(scaffolds):.4f}")
+
+    if not reference_data_path:
+        print("(pass --reference-data-path to also check novelty/scaffold overlap against a training set)")
+        return
+
+    reference_graphs = load_graph_dataset(reference_data_path)
+    reference_smiles = [s for s in (getattr(g, "smiles", None) for g in reference_graphs) if s]
+    reference_mols, _ = mols_from_smiles(reference_smiles)
+    reference_fps = morgan_fingerprints(reference_mols)
+    reference_scaffolds = {murcko_scaffold_smiles(mol) for mol in reference_mols}
+
+    nn_sims = nearest_neighbor_similarity(fps, reference_fps)
+    exact_matches = sum(1 for sim in nn_sims if sim >= 0.999)
+    print(f"Reference set: {reference_data_path} ({len(reference_mols)} molecules)")
+    print(f"Mean nearest-neighbor Tanimoto similarity to reference: {sum(nn_sims) / len(nn_sims):.4f}")
+    print(f"Candidates that exactly match a reference molecule (Tanimoto>=0.999): {exact_matches}/{len(mols)}")
+    print(f"Candidates novel (Tanimoto<1.0 to every reference molecule): {len(mols) - exact_matches}/{len(mols)}")
+
+    scaffold_overlap = sum(1 for s in scaffolds if s in reference_scaffolds)
+    print(f"Candidate scaffolds also seen in reference set: {scaffold_overlap}/{len(mols)}")
 
 
 if __name__ == "__main__":
