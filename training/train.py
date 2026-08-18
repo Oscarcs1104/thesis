@@ -258,7 +258,7 @@ def main() -> None:
             raise ValueError("Checkpoint does not contain model_state_dict or state_dict")
         model.load_state_dict(state_dict, strict=False)
     if args.graph_pretrained_checkpoint:
-        checkpoint = torch.load(args.graph_pretrained_checkpoint, map_location="cpu")
+        checkpoint = torch.load(args.graph_pretrained_checkpoint, map_location="cpu", weights_only=False)
         state_dict = checkpoint.get("graph_encoder", checkpoint.get("encoder_state_dict", checkpoint.get("model_state_dict", {})))
         if isinstance(state_dict, dict):
             model.graph_encoder.load_state_dict(state_dict, strict=False)

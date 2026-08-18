@@ -36,6 +36,7 @@ selfies>=2.1.1          # REQUIRED for SELFIES tokenization in the decoder.
 numpy==2.4.4
 scipy==1.17.1
 networkx==3.6.1
+joblib>=1.3          # parallelizes the descriptor/functional-group precompute in pretrain_graph.py
 
 # Plotting / reporting (used by tools/ploting.py) -- also missing from "thesis" today
 pandas==2.3.3
