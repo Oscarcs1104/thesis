@@ -59,8 +59,21 @@ def smiles_to_data(smiles: str, target: Optional[float] = None) -> Optional[Data
             data.y = torch.tensor([float(target)], dtype=torch.float)
         except Exception:
             data.y = torch.tensor([0.0], dtype=torch.float)
-    data.smiles = smiles
+    # Store the canonical form so every downstream consumer (language branch,
+    # decoder target) sees a consistent string for the same molecule.
+    data.smiles = Chem.MolToSmiles(mol)
     return data
+
+
+def randomize_smiles(smiles: str) -> str:
+    """Return a randomized (non-canonical) SMILES for the same molecule.
+
+    Falls back to the input unchanged if it can't be parsed.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return smiles
+    return Chem.MolToSmiles(mol, canonical=False, doRandom=True)
 
 
 def find_csv_in_dataset_dir(dataset_dir: Path) -> Optional[Path]:

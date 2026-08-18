@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
 import sys
 from pathlib import Path
 
@@ -15,10 +16,17 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from data_pipeline.convert_smiles_to_pyg import randomize_smiles
 from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset
 from model.model import build_model_from_args
 from model.smiles_decoder import build_vocab as build_smiles_vocab, encode_batch as encode_smiles_batch
 from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
+
+
+def _augment_smiles_batch(smiles_batch, augment_prob: float):
+    if augment_prob <= 0:
+        return smiles_batch
+    return [randomize_smiles(smi) if random.random() < augment_prob else smi for smi in smiles_batch]
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +63,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--training-mode", type=str, default="predictor", choices=["predictor", "joint", "decoder"])
     parser.add_argument("--decoder-loss-weight", type=float, default=0.5)
     parser.add_argument("--decoder-max-len", type=int, default=96)
+    parser.add_argument(
+        "--smiles-augment-prob",
+        type=float,
+        default=0.0,
+        help="Probability of replacing a molecule's SMILES with a randomized (non-canonical) equivalent before "
+        "it reaches the language branch during decoder training. The decoder target stays the canonical form "
+        "regardless, so this teaches it to reconstruct consistently no matter which valid SMILES it was given.",
+    )
     add_wandb_args(parser)
     return parser.parse_args()
 
@@ -153,7 +169,7 @@ def evaluate(model, loader, criterion, device, task: str, target_range: tuple[fl
     return metrics
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, task: str, target_range, use_decoder: bool, training_mode: str, decoder_vocab: dict | None, decoder_loss_weight: float, decoder_max_len: int):
+def train_one_epoch(model, loader, optimizer, criterion, device, task: str, target_range, use_decoder: bool, training_mode: str, decoder_vocab: dict | None, decoder_loss_weight: float, decoder_max_len: int, smiles_augment_prob: float = 0.0):
     model.train()
     total_loss = 0.0
     total_items = 0
@@ -167,7 +183,11 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
             smiles = getattr(batch, "smiles", None)
             if smiles is None:
                 raise ValueError("Decoder training needs batch.smiles")
+            # Target is derived from the untouched (canonical) SMILES; the language branch may see a
+            # randomized equivalent instead, so the decoder learns to reconstruct the canonical form
+            # regardless of which valid SMILES the encoder was given.
             decoder_inputs, decoder_targets = encode_smiles_batch(smiles, decoder_vocab, decoder_max_len, device)
+            batch.smiles = _augment_smiles_batch(smiles, smiles_augment_prob)
             batch_y = getattr(batch, "y", None)
             property_values = (batch_y.float().unsqueeze(-1) if batch_y.dim() == 1 else batch_y.float()) if batch_y is not None else None
             if training_mode == "decoder":
@@ -271,7 +291,7 @@ def main() -> None:
     best_val = float("inf")
     best_state = None
     for epoch in range(1, args.epochs + 1):
-        train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len)
+        train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len, args.smiles_augment_prob)
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
         if args.use_decoder and args.training_mode == "decoder":
             print(
