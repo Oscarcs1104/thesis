@@ -15,7 +15,7 @@ from data_pipeline.convert_smiles_to_pyg import canonicalize_smiles as _canonica
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data
 from data_pipeline.data import load_graph_dataset
 from model.model import build_model_from_args
-from tools.mol_metrics import mean_pairwise_tanimoto, mols_from_smiles, morgan_fingerprints, murcko_scaffold_smiles, nearest_neighbor_similarity, shannon_entropy
+from tools.mol_metrics import mean_pairwise_tanimoto, mols_from_smiles, morgan_fingerprints, murcko_scaffold_smiles, nearest_neighbor_similarity, shannon_entropy, tanimoto_similarity
 
 # (relative CSV path, target property column)
 _DATASET_FILES = {
@@ -173,6 +173,9 @@ def main() -> None:
     )
 
     canonical_input = _canonical_smiles(args.smiles)
+    input_mols, _ = mols_from_smiles([canonical_input] if canonical_input else [])
+    input_fp = morgan_fingerprints(input_mols)[0] if input_mols else None
+
     seen_candidates: set[str] = set()
     num_invalid = 0
 
@@ -192,12 +195,19 @@ def main() -> None:
         seen_candidates.add(canonical_candidate)
         candidate_pred = _predict_property(model, candidate, device)
         pred_str = f"{candidate_pred:.4f}" if candidate_pred is not None else "N/A"
-        print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}")
 
-    _print_generation_metrics(list(seen_candidates), len(candidates), num_invalid, args.reference_data_path)
+        tanimoto_str = "N/A"
+        if input_fp is not None:
+            candidate_mols, _ = mols_from_smiles([canonical_candidate])
+            if candidate_mols:
+                candidate_fp = morgan_fingerprints(candidate_mols)[0]
+                tanimoto_str = f"{tanimoto_similarity(input_fp, candidate_fp):.4f}"
+        print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}  | Tanimoto to input: {tanimoto_str}")
+
+    _print_generation_metrics(list(seen_candidates), len(candidates), num_invalid, canonical_input, args.reference_data_path)
 
 
-def _print_generation_metrics(canonical_candidates: list[str], num_generated: int, num_invalid: int, reference_data_path: str | None) -> None:
+def _print_generation_metrics(canonical_candidates: list[str], num_generated: int, num_invalid: int, canonical_input: str | None, reference_data_path: str | None) -> None:
     print("\n--- Generation metrics ---")
     print(f"Valid: {num_generated - num_invalid}/{num_generated} ({(num_generated - num_invalid) / max(num_generated, 1):.1%})")
     print(f"Unique, novel-vs-input candidates: {len(canonical_candidates)}")
@@ -205,11 +215,25 @@ def _print_generation_metrics(canonical_candidates: list[str], num_generated: in
     mols, parse_failed = mols_from_smiles(canonical_candidates)
     if parse_failed:
         print(f"Warning: {parse_failed} canonical candidates failed to re-parse (unexpected)")
-    if len(mols) < 2:
-        print("Not enough distinct candidates for diversity/scaffold metrics")
+    if not mols:
+        print("No distinct candidates to measure")
         return
 
     fps = morgan_fingerprints(mols)
+
+    input_mols, _ = mols_from_smiles([canonical_input] if canonical_input else [])
+    if input_mols:
+        input_fp = morgan_fingerprints(input_mols)[0]
+        input_sims = [tanimoto_similarity(input_fp, fp) for fp in fps]
+        print(
+            f"Tanimoto similarity to input -- mean: {sum(input_sims) / len(input_sims):.4f}, "
+            f"min: {min(input_sims):.4f}, max: {max(input_sims):.4f}"
+        )
+
+    if len(mols) < 2:
+        print("Not enough distinct candidates for internal diversity/scaffold metrics")
+        return
+
     mean_sim = mean_pairwise_tanimoto(fps)
     print(f"Internal diversity (1 - mean pairwise Tanimoto): {1 - mean_sim:.4f}")
 

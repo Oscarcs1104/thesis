@@ -45,6 +45,10 @@ def mean_pairwise_tanimoto(fps: Sequence) -> Optional[float]:
     return total / count if count else None
 
 
+def tanimoto_similarity(fp1, fp2) -> float:
+    return DataStructs.TanimotoSimilarity(fp1, fp2)
+
+
 def nearest_neighbor_similarity(query_fps: Sequence, reference_fps: Sequence) -> List[float]:
     """For each query fingerprint, the highest Tanimoto similarity to any reference fingerprint."""
     if not reference_fps:
