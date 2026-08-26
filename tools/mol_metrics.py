@@ -70,3 +70,15 @@ def shannon_entropy(labels: Sequence[str]) -> float:
         counts[label] = counts.get(label, 0) + 1
     total = len(labels)
     return -sum((c / total) * math.log(c / total) for c in counts.values())
+
+
+def normalized_shannon_entropy(labels: Sequence[str]) -> float:
+    """Shannon entropy divided by its theoretical max (ln of the unique label count).
+
+    0 = a single label dominates everything; 1 = every label is equally frequent
+    (as uniform as possible given how many unique labels exist).
+    """
+    unique = len(set(labels))
+    if unique <= 1:
+        return 0.0
+    return shannon_entropy(labels) / math.log(unique)

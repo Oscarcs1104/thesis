@@ -38,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gatv2", choices=["gcn", "gat", "gatv2", "gin"])
+    parser.add_argument("--use-graph", action=argparse.BooleanOptionalAction, default=True, help="Disable to predict/generate from the language branch alone (e.g. --no-use-graph for a MoLFormer-only ablation)")
+    parser.add_argument("--freeze-graph-encoder", action=argparse.BooleanOptionalAction, default=False, help="Freeze the graph encoder's weights (e.g. combine with --graph-pretrained-checkpoint to use it as a fixed, untrained-further feature extractor)")
     parser.add_argument("--language-backbone", type=str, default="huggingface", choices=["huggingface", "none"])
     parser.add_argument("--language-model-name", type=str, default="DeepChem/ChemBERTa-77M-MLM", help="Any HuggingFace text-encoder repo id (e.g. a ChemBERTa or MoLFormer checkpoint)")
     parser.add_argument("--freeze-language-backbone", action=argparse.BooleanOptionalAction, default=True)
@@ -262,6 +264,9 @@ def main() -> None:
         state_dict = checkpoint.get("graph_encoder", checkpoint.get("encoder_state_dict", checkpoint.get("model_state_dict", {})))
         if isinstance(state_dict, dict):
             model.graph_encoder.load_state_dict(state_dict, strict=False)
+    if args.freeze_graph_encoder:
+        for parameter in model.graph_encoder.parameters():
+            parameter.requires_grad_(False)
 
     if args.use_decoder and args.training_mode == "decoder":
         sample_graph = train_set[0]
@@ -290,6 +295,7 @@ def main() -> None:
 
     best_val = float("inf")
     best_state = None
+    epochs_without_improvement = 0
     for epoch in range(1, args.epochs + 1):
         train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len, args.smiles_augment_prob)
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
@@ -316,6 +322,7 @@ def main() -> None:
         )
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
+            epochs_without_improvement = 0
             best_state = {
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
@@ -325,7 +332,9 @@ def main() -> None:
             checkpoint_path = Path(args.checkpoint_path) if args.checkpoint_path else Path("checkpoints") / "best.pt"
             checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, checkpoint_path)
-        if epoch > args.patience and val_metrics["loss"] >= best_val:
+        else:
+            epochs_without_improvement += 1
+        if epochs_without_improvement >= args.patience:
             break
 
     if best_state is not None:

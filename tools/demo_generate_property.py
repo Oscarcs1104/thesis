@@ -15,7 +15,7 @@ from data_pipeline.convert_smiles_to_pyg import canonicalize_smiles as _canonica
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data
 from data_pipeline.data import load_graph_dataset
 from model.model import build_model_from_args
-from tools.mol_metrics import mean_pairwise_tanimoto, mols_from_smiles, morgan_fingerprints, murcko_scaffold_smiles, nearest_neighbor_similarity, shannon_entropy, tanimoto_similarity
+from tools.mol_metrics import mean_pairwise_tanimoto, mols_from_smiles, morgan_fingerprints, murcko_scaffold_smiles, nearest_neighbor_similarity, normalized_shannon_entropy, tanimoto_similarity
 
 # (relative CSV path, target property column)
 _DATASET_FILES = {
@@ -77,6 +77,7 @@ def build_model(checkpoint_path: str, device: str):
     args.setdefault("dropout", 0.3)
     args.setdefault("node_encoding", "dense")
     args.setdefault("node_vocab_sizes", [119, 4])
+    args.setdefault("use_graph", True)
     args.setdefault("use_language", True)
     args.setdefault("use_decoder", True)
 
@@ -176,6 +177,13 @@ def main() -> None:
     input_mols, _ = mols_from_smiles([canonical_input] if canonical_input else [])
     input_fp = morgan_fingerprints(input_mols)[0] if input_mols else None
 
+    reference_canonical: set[str] | None = None
+    if args.reference_data_path:
+        reference_graphs = load_graph_dataset(args.reference_data_path)
+        reference_canonical = {
+            c for c in (_canonical_smiles(getattr(g, "smiles", None) or "") for g in reference_graphs) if c
+        }
+
     seen_candidates: set[str] = set()
     num_invalid = 0
 
@@ -202,7 +210,11 @@ def main() -> None:
             if candidate_mols:
                 candidate_fp = morgan_fingerprints(candidate_mols)[0]
                 tanimoto_str = f"{tanimoto_similarity(input_fp, candidate_fp):.4f}"
-        print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}  | Tanimoto to input: {tanimoto_str}")
+
+        in_dataset_str = ""
+        if reference_canonical is not None:
+            in_dataset_str = f"  | already in {args.reference_data_path}: {'yes' if canonical_candidate in reference_canonical else 'no'}"
+        print(f"{idx:02d}. {candidate}  | predicted property: {pred_str}  | Tanimoto to input: {tanimoto_str}{in_dataset_str}")
 
     _print_generation_metrics(list(seen_candidates), len(candidates), num_invalid, canonical_input, args.reference_data_path)
 
@@ -239,7 +251,8 @@ def _print_generation_metrics(canonical_candidates: list[str], num_generated: in
 
     scaffolds = [murcko_scaffold_smiles(mol) for mol in mols]
     print(f"Unique Murcko scaffolds among candidates: {len(set(scaffolds))}/{len(mols)}")
-    print(f"Shannon entropy over candidate scaffolds: {shannon_entropy(scaffolds):.4f}")
+    normalized_entropy = normalized_shannon_entropy(scaffolds)
+    print(f"Normalized Shannon entropy over candidate scaffolds (H/Hmax): {normalized_entropy:.4f} ({normalized_entropy:.1%})")
 
     if not reference_data_path:
         print("(pass --reference-data-path to also check novelty/scaffold overlap against a training set)")

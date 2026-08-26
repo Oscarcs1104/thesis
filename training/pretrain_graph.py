@@ -157,7 +157,7 @@ def _build_pretrain_labels(graphs, n_jobs: int = -1):
     parallelized across processes -- the same pattern BerMol's vocab.py uses)."""
     indexed = [(i, g.smiles) for i, g in enumerate(graphs) if getattr(g, "smiles", None)]
     print(f"Computing descriptors + functional groups for {len(indexed)} molecules...")
-    results = Parallel(n_jobs=n_jobs)(delayed(_compute_one_label)(smi) for _, smi in indexed)
+    results = Parallel(n_jobs=n_jobs, verbose=10)(delayed(_compute_one_label)(smi) for _, smi in indexed)
 
     kept_graphs = []
     raw_descriptors = []

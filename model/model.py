@@ -18,12 +18,13 @@ class MultimodalModel(nn.Module):
         self,
         hidden_dim: int,
         output_dim: int,
-        graph_backbone: str = "gatv2",
+        graph_backbone: str = "gin",
         language_backbone: str = "huggingface",
         num_layers: int = 3,
         dropout: float = 0.3,
         node_encoding: str = "categorical",
         node_vocab_sizes: Optional[Sequence[int]] = None,
+        use_graph: bool = True,
         use_language: bool = True,
         language_model_name: str = "seyonec/ChemBERTa-zinc-base-v1",
         freeze_language_backbone: bool = True,
@@ -45,7 +46,10 @@ class MultimodalModel(nn.Module):
         self.graph_backbone = graph_backbone
         self.language_backbone = language_backbone.lower()
         self.num_layers = num_layers
+        self.use_graph = use_graph
         self.use_language = use_language and self.language_backbone != "none"
+        if not self.use_graph and not self.use_language:
+            raise ValueError("At least one of use_graph or use_language must be enabled")
         self.use_decoder = use_decoder
         self.dropout = nn.Dropout(dropout)
 
@@ -80,7 +84,7 @@ class MultimodalModel(nn.Module):
                 end_idx=decoder_end_idx,
             )
 
-        fused_dim = hidden_dim * (2 if self.use_language else 1)
+        fused_dim = hidden_dim * (int(self.use_graph) + int(self.use_language))
         self.head = nn.Sequential(
             nn.Linear(fused_dim, fused_dim),
             nn.ReLU(),
@@ -94,7 +98,7 @@ class MultimodalModel(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-    def _get_states(self, data: torch.nn.Module) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_states(self, data: torch.nn.Module) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         # Read graph and language inputs once.
         x = data.x
         edge_index = data.edge_index
@@ -102,13 +106,18 @@ class MultimodalModel(nn.Module):
         smiles = getattr(data, "smiles", None)
 
         batch_size = int(batch.max().item()) + 1
-        _, layer_graph_states = self.graph_encoder(x, edge_index, batch)
+        graph_state = None
+        if self.use_graph:
+            _, layer_graph_states = self.graph_encoder(x, edge_index, batch)
+            graph_state = layer_graph_states[-1]
         lang_state = self.language_encoder(smiles, batch_size=batch_size, device=x.device)
-        return layer_graph_states[-1], lang_state
+        return graph_state, lang_state
 
     def encode(self, data: torch.nn.Module) -> torch.Tensor:
         graph_state, lang_state = self._get_states(data)
-        return torch.cat([graph_state, lang_state], dim=-1) if self.use_language else graph_state
+        if self.use_graph and self.use_language:
+            return torch.cat([graph_state, lang_state], dim=-1)
+        return graph_state if self.use_graph else lang_state
 
     def _build_decoder_latent(self, fused_feat: torch.Tensor, property_values: Optional[torch.Tensor] = None) -> torch.Tensor:
         if property_values is None:
@@ -200,6 +209,7 @@ def build_model_from_args(args) -> MultimodalModel:
         dropout=args.dropout,
         node_encoding=args.node_encoding,
         node_vocab_sizes=args.node_vocab_sizes,
+        use_graph=getattr(args, "use_graph", True),
         use_language=args.use_language,
         language_model_name=getattr(args, "language_model_name", "DeepChem/ChemBERTa-77M-MLM"),
         freeze_language_backbone=getattr(args, "freeze_language_backbone", True),

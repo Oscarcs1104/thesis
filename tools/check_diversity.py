@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from data_pipeline.data import load_graph_dataset
-from tools.mol_metrics import mols_from_smiles, murcko_scaffold_smiles, shannon_entropy
+from tools.mol_metrics import mols_from_smiles, murcko_scaffold_smiles, normalized_shannon_entropy
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,9 +43,9 @@ def main() -> None:
 
     scaffolds = [murcko_scaffold_smiles(mol) for mol in mols]
     unique_scaffolds = len(set(scaffolds))
-    entropy = shannon_entropy(scaffolds)
+    normalized_entropy = normalized_shannon_entropy(scaffolds)
     print(f"Unique Murcko scaffolds: {unique_scaffolds} / {len(mols)} molecules ({unique_scaffolds / max(len(mols), 1):.2%})")
-    print(f"Shannon entropy over scaffolds: {entropy:.4f}")
+    print(f"Normalized Shannon entropy over scaffolds (H/Hmax): {normalized_entropy:.4f} ({normalized_entropy:.1%})")
 
 
 if __name__ == "__main__":
