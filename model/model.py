@@ -143,11 +143,27 @@ class MultimodalModel(nn.Module):
         cond_input = torch.cat([fused_feat, prop], dim=-1)
         return self.decoder_condition_proj(cond_input)
 
-    def forward(self, data: torch.nn.Module, decoder_input_ids: Optional[torch.Tensor] = None, return_aux: bool = False, property_values: Optional[torch.Tensor] = None):
+    def forward(
+        self,
+        data: torch.nn.Module,
+        decoder_input_ids: Optional[torch.Tensor] = None,
+        return_aux: bool = False,
+        property_values: Optional[torch.Tensor] = None,
+        decoder_context_dropout_mask: Optional[torch.Tensor] = None,
+    ):
         fused_feat = self.encode(data)
 
         logits = self.head(fused_feat)
-        decoder_latent = self._build_decoder_latent(fused_feat, property_values=property_values)
+
+        decoder_context = fused_feat
+        if decoder_context_dropout_mask is not None:
+            # Zero out the molecule-derived context for the flagged samples so the decoder can only
+            # rely on property_values to pick a target molecule -- otherwise fused_feat already fully
+            # determines the (single, fixed) training target and the property signal stays unused.
+            keep = 1.0 - decoder_context_dropout_mask.to(fused_feat.dtype).view(-1, 1)
+            decoder_context = fused_feat * keep
+
+        decoder_latent = self._build_decoder_latent(decoder_context, property_values=property_values)
         decoder_logits = self.decoder(decoder_latent, decoder_input_ids) if self.decoder is not None and decoder_input_ids is not None else None
 
         if not return_aux:

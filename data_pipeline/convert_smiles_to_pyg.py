@@ -35,14 +35,14 @@ def atom_features(atom: Chem.Atom) -> np.ndarray:
 def canonicalize_smiles(smiles: str) -> Optional[str]:
     """Return the canonical SMILES for a molecule, or None if it can't be parsed."""
     mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
+    if mol is None or mol.GetNumAtoms() == 0:
         return None
     return Chem.MolToSmiles(mol)
 
 
 def smiles_to_data(smiles: str, target: Optional[float] = None) -> Optional[Data]:
     mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
+    if mol is None or mol.GetNumAtoms() == 0:
         return None
     # node features
     feats = [atom_features(a) for a in mol.GetAtoms()]

@@ -8,5 +8,6 @@ data/*
 checkpoints/
 wandb/
 plots/
+slurm/
 *.pt
 *.pth

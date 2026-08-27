@@ -73,6 +73,17 @@ def parse_args() -> argparse.Namespace:
         "it reaches the language branch during decoder training. The decoder target stays the canonical form "
         "regardless, so this teaches it to reconstruct consistently no matter which valid SMILES it was given.",
     )
+    parser.add_argument(
+        "--property-context-dropout-prob",
+        type=float,
+        default=0.0,
+        help="Probability, per training sample, of zeroing the molecule-derived context fed to the decoder "
+        "(keeping property_values and the true decoder target unchanged). Without this, property_values is "
+        "always the target molecule's own real value, so the decoder can reconstruct it from the molecule "
+        "encoding alone and never has to actually use the property signal. Forcing some batches to be "
+        "property-only teaches the decoder to treat property_values as real conditioning instead of a "
+        "redundant input. Try 0.3-0.5 for --training-mode joint/decoder.",
+    )
     add_wandb_args(parser)
     return parser.parse_args()
 
@@ -171,7 +182,7 @@ def evaluate(model, loader, criterion, device, task: str, target_range: tuple[fl
     return metrics
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, task: str, target_range, use_decoder: bool, training_mode: str, decoder_vocab: dict | None, decoder_loss_weight: float, decoder_max_len: int, smiles_augment_prob: float = 0.0):
+def train_one_epoch(model, loader, optimizer, criterion, device, task: str, target_range, use_decoder: bool, training_mode: str, decoder_vocab: dict | None, decoder_loss_weight: float, decoder_max_len: int, smiles_augment_prob: float = 0.0, property_context_dropout_prob: float = 0.0):
     model.train()
     total_loss = 0.0
     total_items = 0
@@ -192,14 +203,17 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
             batch.smiles = _augment_smiles_batch(smiles, smiles_augment_prob)
             batch_y = getattr(batch, "y", None)
             property_values = (batch_y.float().unsqueeze(-1) if batch_y.dim() == 1 else batch_y.float()) if batch_y is not None else None
+            context_dropout_mask = None
+            if property_context_dropout_prob > 0.0 and property_values is not None:
+                context_dropout_mask = torch.rand(batch.num_graphs, device=device) < property_context_dropout_prob
             if training_mode == "decoder":
                 # Unconditional pretraining is fine here (e.g. unlabeled ZINC): property_values may be None.
-                _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
+                _, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values, decoder_context_dropout_mask=context_dropout_mask)
                 loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
             else:  # joint
                 if batch_y is None:
                     raise ValueError("Joint training needs a labeled dataset (batch.y)")
-                prop_logits, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values)
+                prop_logits, decoder_logits = model(batch, decoder_input_ids=decoder_inputs, property_values=property_values, decoder_context_dropout_mask=context_dropout_mask)
                 prop_loss = criterion(prop_logits, batch_y.float().view_as(prop_logits))
                 dec_loss = decoder_criterion(decoder_logits.view(-1, decoder_logits.size(-1)), decoder_targets.view(-1))
                 loss = prop_loss + decoder_loss_weight * dec_loss
@@ -227,6 +241,57 @@ def train_one_epoch(model, loader, optimizer, criterion, device, task: str, targ
         else:
             metrics["nrmse"] = float("nan")
     return metrics
+
+
+def run_predictor_ablation_training(model, args, train_set, val_set, test_set, target_range, criterion) -> dict:
+    """Shared predictor-only training loop (train/val/test + early stopping + checkpointing
+    + wandb logging) for the fusion ablation scripts (train_cross_attention.py,
+    train_moe_fusion.py) -- keeps their behavior identical to each other and to the
+    predictor path here, so a fix like the early-stopping counter only needs to happen once."""
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
+    wandb_run = wandb_init(args, config=vars(args))
+
+    train_loader = make_loader(train_set, args.batch_size, shuffle=True, num_workers=args.num_workers)
+    val_loader = make_loader(val_set, args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    best_val = float("inf")
+    best_state = None
+    epochs_without_improvement = 0
+    for epoch in range(1, args.epochs + 1):
+        train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, use_decoder=False, training_mode="predictor", decoder_vocab=None, decoder_loss_weight=0.0, decoder_max_len=96)
+        val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=False, training_mode="predictor", decoder_vocab=None)
+        print(
+            f"Epoch {epoch:03d} | train_loss={train_metrics['loss']:.4f} | val_loss={val_metrics['loss']:.4f} "
+            f"| train_rmse={train_metrics.get('rmse', float('nan')):.4f} | val_rmse={val_metrics.get('rmse', float('nan')):.4f} "
+            f"| train_nrmse={train_metrics.get('nrmse', float('nan')):.4f} | val_nrmse={val_metrics.get('nrmse', float('nan')):.4f}"
+        )
+        wandb_log(
+            wandb_run,
+            {**{f"train/{k}": v for k, v in train_metrics.items()}, **{f"val/{k}": v for k, v in val_metrics.items()}},
+            step=epoch,
+        )
+        if val_metrics["loss"] < best_val:
+            best_val = val_metrics["loss"]
+            epochs_without_improvement = 0
+            best_state = {"model_state_dict": model.state_dict(), "epoch": epoch, "args": vars(args)}
+            if args.checkpoint_path:
+                checkpoint_path = Path(args.checkpoint_path)
+                checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(best_state, checkpoint_path)
+        else:
+            epochs_without_improvement += 1
+        if epochs_without_improvement >= args.patience:
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state["model_state_dict"])
+
+    test_loader = make_loader(test_set, args.batch_size, shuffle=False, num_workers=args.num_workers)
+    test_metrics = evaluate(model, test_loader, criterion, args.device, args.task, target_range, use_decoder=False, training_mode="predictor", decoder_vocab=None)
+    print(f"Test loss={test_metrics['loss']:.4f} | Test RMSE={test_metrics.get('rmse', float('nan')):.4f} | Test NRMSE={test_metrics.get('nrmse', float('nan')):.4f}")
+    wandb_log(wandb_run, {f"test/{k}": v for k, v in test_metrics.items()})
+    wandb_finish(wandb_run)
+    return test_metrics
 
 
 def main() -> None:
@@ -297,7 +362,7 @@ def main() -> None:
     best_state = None
     epochs_without_improvement = 0
     for epoch in range(1, args.epochs + 1):
-        train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len, args.smiles_augment_prob)
+        train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, args.device, args.task, target_range, args.use_decoder, args.training_mode, decoder_vocab, args.decoder_loss_weight, args.decoder_max_len, args.smiles_augment_prob, args.property_context_dropout_prob)
         val_metrics = evaluate(model, val_loader, criterion, args.device, args.task, target_range, use_decoder=args.use_decoder, training_mode=args.training_mode, decoder_vocab=decoder_vocab, decoder_max_len=args.decoder_max_len)
         if args.use_decoder and args.training_mode == "decoder":
             print(
