@@ -11,3 +11,6 @@ plots/
 slurm/
 *.pt
 *.pth
+
+results/*.log
+results/*.err

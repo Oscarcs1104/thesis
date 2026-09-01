@@ -1,7 +1,7 @@
-"""Ablation: train the property predictor with the experimental cross-attention
-fusion (model/cross_attention_model.py) instead of the main pool-and-concatenate
-fusion. Predictor-only, no decoder, regression only -- for comparing Test
-RMSE/NRMSE against the same dataset trained with training/train.py.
+"""Ablation: train the property predictor with graph + a MoLA-style precomputed,
+frozen IBM MoLFormer embedding, instead of the main model's live language branch.
+Needs embeddings from data_pipeline/precompute_molformer_embeddings.py first.
+Predictor-only, no decoder.
 
 See COMMANDS.md for usage.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -20,25 +21,21 @@ if str(ROOT) not in sys.path:
 
 from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset
 from data_pipeline.splitters import split_dataset as split_dataset_by_strategy
-from model.cross_attention_model import build_cross_attention_model_from_args
+from model.precomputed_molformer_model import build_precomputed_molformer_model_from_args
 from training.repro import seed_everything
-from training.train import (
-    _target_range,
-    load_graph_pretrained_checkpoint,
-    load_predefined_datasets,
-    resolve_predefined_split,
-    run_predictor_ablation_training,
-)
+from training.train import _target_range, load_graph_pretrained_checkpoint, resolve_predefined_split, run_predictor_ablation_training
 from training.wandb_utils import add_wandb_args
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the predictor with cross-attention graph/language fusion")
+    parser = argparse.ArgumentParser(description="Train the predictor with graph + precomputed frozen IBM MoLFormer embeddings (MoLA-style)")
     parser.add_argument("--data-path", type=str, default=None, help="Single CSV/graph dataset, split internally via --split. Ignored if --dataset-dir or --train-path/--val-path/--test-path is given.")
     parser.add_argument("--dataset-dir", type=str, default=None, help="Folder with csv/train.csv, csv/valid.csv, csv/test.csv -- uses that official split as-is (D1)")
     parser.add_argument("--train-path", type=str, default=None)
     parser.add_argument("--val-path", type=str, default=None)
     parser.add_argument("--test-path", type=str, default=None)
+    parser.add_argument("--molformer-embeddings-path", type=str, required=True, help="Output of data_pipeline/precompute_molformer_embeddings.py -- must cover every split's SMILES")
+    parser.add_argument("--molformer-dim", type=int, default=768)
     parser.add_argument("--output-dim", type=int, default=1)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-layers", type=int, default=3)
@@ -46,11 +43,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graph-backbone", type=str, default="gin", choices=["gcn", "gat", "gatv2", "gin"])
     parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
     parser.add_argument("--node-vocab-sizes", type=int, nargs="*", default=[119, 4])
-    parser.add_argument("--language-model-name", type=str, default="DeepChem/ChemBERTa-77M-MLM")
-    parser.add_argument("--freeze-language-backbone", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--trust-remote-code", action="store_true")
-    parser.add_argument("--num-heads", type=int, default=4, help="Attention heads in each cross-attention layer")
-    parser.add_argument("--num-cross-layers", type=int, default=1, help="How many rounds of graph<->language cross-attention")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=50)
@@ -72,23 +64,50 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--checkpoint-path", type=str, default=None)
-    parser.add_argument("--graph-pretrained-checkpoint", type=str, default=None, help="Load graph_encoder weights from a training/pretrain_graph.py checkpoint")
+    parser.add_argument("--graph-pretrained-checkpoint", type=str, default=None)
     add_wandb_args(parser)
     return parser.parse_args()
+
+
+def _attach_molformer_embeddings(graphs, embeddings: Dict[str, torch.Tensor]) -> None:
+    if not embeddings:
+        raise ValueError(
+            "--molformer-embeddings-path loaded an empty embeddings file -- re-run "
+            "data_pipeline/precompute_molformer_embeddings.py, or check the --out path"
+        )
+    emb_dim = next(iter(embeddings.values())).shape
+    missing = 0
+    for g in graphs:
+        smi = getattr(g, "smiles", None)
+        emb = embeddings.get(smi)
+        if emb is None:
+            missing += 1
+            emb = torch.zeros(emb_dim)
+        g.molformer_emb = emb.clone().view(1, -1)
+    if missing:
+        print(f"Warning: {missing} molecules had no precomputed MoLFormer embedding (filled with zeros) -- regenerate embeddings if this is unexpected")
 
 
 def main() -> None:
     args = parse_args()
     seed_everything(args.seed, deterministic=args.deterministic)
 
+    embeddings = torch.load(args.molformer_embeddings_path, map_location="cpu", weights_only=False)
+
     predefined = resolve_predefined_split(args)
     if predefined is not None:
-        train_set, val_set, test_set = load_predefined_datasets(*predefined)
+        train_path, val_path, test_path = predefined
+        train_graphs, val_graphs, test_graphs = (load_graph_dataset(p) for p in (train_path, val_path, test_path))
+        for graphs in (train_graphs, val_graphs, test_graphs):
+            _attach_molformer_embeddings(graphs, embeddings)
+        train_set, val_set, test_set = (HybridGraphLangDataset(g) for g in (train_graphs, val_graphs, test_graphs))
         print(f"Loaded predefined split from {predefined}: train={len(train_set)} val={len(val_set)} test={len(test_set)}")
     else:
         if not args.data_path:
             raise ValueError("Provide --dataset-dir (predefined split) or --data-path (internal split via --split).")
-        dataset = HybridGraphLangDataset(load_graph_dataset(args.data_path))
+        graphs = load_graph_dataset(args.data_path)
+        _attach_molformer_embeddings(graphs, embeddings)
+        dataset = HybridGraphLangDataset(graphs)
         all_smiles = [str(getattr(dataset[i], "smiles", "")) for i in range(len(dataset))]
         train_set, val_set, test_set = split_dataset_by_strategy(
             dataset, args.split, args.train_ratio, args.val_ratio, args.test_ratio, args.seed, smiles_list=all_smiles
@@ -97,7 +116,7 @@ def main() -> None:
 
     criterion = nn.MSELoss()
 
-    model = build_cross_attention_model_from_args(args)
+    model = build_precomputed_molformer_model_from_args(args)
     if args.graph_pretrained_checkpoint:
         load_graph_pretrained_checkpoint(model, args.graph_pretrained_checkpoint)
     model = model.to(args.device)

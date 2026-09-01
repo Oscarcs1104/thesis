@@ -1,0 +1,13 @@
+tag,data_path,split,seed,loss,mae,mse,nrmse,rmse
+esol/graph-only,data/esol.csv,scaffold,2025,0.943531,1.622111,4.030149,0.152316,2.007523
+esol/graph-only,data/esol.csv,scaffold,2026,0.797680,1.509155,3.407170,0.140049,1.845852
+esol/graph-only,data/esol.csv,scaffold,mean±std(n=2),0.870605±0.072925,1.565633±0.056478,3.718659±0.311489,0.146183±0.006133,1.926688±0.080835
+esol/graph-only,data/esol.csv,scaffold,2025,0.825379,1.540025,3.525481,0.142460,1.877626
+esol/graph-only,data/esol.csv,scaffold,2026,0.872747,1.493310,3.727806,0.146491,1.930753
+esol/graph-only,data/esol.csv,scaffold,mean±std(n=2),0.849063±0.023684,1.516667±0.023358,3.626643±0.101163,0.144476±0.002015,1.904189±0.026563
+freesolv/graph-only,data/freesolv.csv,scaffold,2025,1.916455,3.618084,20.586948,0.169428,4.537284
+freesolv/graph-only,data/freesolv.csv,scaffold,2026,2.428091,4.028622,26.083046,0.190708,5.107156
+freesolv/graph-only,data/freesolv.csv,scaffold,mean±std(n=2),2.172273±0.255818,3.823353±0.205269,23.334997±2.748049,0.180068±0.010640,4.822220±0.284936
+lipo/graph-only,data/lipo.csv,scaffold,2025,0.714954,0.831040,1.048482,0.170659,1.023954
+lipo/graph-only,data/lipo.csv,scaffold,2026,0.713210,0.837734,1.045925,0.170451,1.022705
+lipo/graph-only,data/lipo.csv,scaffold,mean±std(n=2),0.714082±0.000872,0.834387±0.003347,1.047204±0.001279,0.170555±0.000104,1.023329±0.000625

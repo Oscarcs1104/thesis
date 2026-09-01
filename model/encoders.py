@@ -79,12 +79,22 @@ class NodeFeatureEncoder(nn.Module):
                 raise ValueError("node_vocab_sizes is required when node_encoding='categorical'")
             self.embeddings = nn.ModuleList([nn.Embedding(int(size), hidden_dim) for size in node_vocab_sizes])
             self.proj = None
+            self.input_norm = None
         else:
             self.embeddings = None
-            if self.node_input_dim is not None:
-                self.proj = nn.Linear(self.node_input_dim, hidden_dim)
-            else:
-                self.proj = None
+            # Dense atom features are always the fixed 7-dim vector from
+            # convert_smiles_to_pyg.atom_features() unless the caller overrides
+            # node_input_dim. Create proj/input_norm eagerly here (not lazily on
+            # first forward) so they're registered submodules *before*
+            # load_state_dict() runs at inference time -- otherwise a freshly
+            # loaded checkpoint's trained input_norm (weight/bias/running stats)
+            # is silently dropped (the key doesn't exist yet, strict=False hides
+            # it), and a lazily-created BatchNorm also never inherits
+            # model.eval(), so it uses batch statistics at inference and crashes
+            # outright on a batch of size 1 (e.g. a single-atom molecule alone).
+            resolved_input_dim = self.node_input_dim if self.node_input_dim is not None else 7
+            self.proj = nn.Linear(resolved_input_dim, hidden_dim)
+            self.input_norm = nn.BatchNorm1d(resolved_input_dim)
 
     def _ensure_dense_projection(self, x: torch.Tensor) -> nn.Linear:
         if self.proj is None:
@@ -99,12 +109,42 @@ class NodeFeatureEncoder(nn.Module):
             self.proj = self.proj.to(x.device)
         return self.proj
 
+    def _ensure_input_norm(self, x: torch.Tensor) -> nn.BatchNorm1d:
+        input_dim = int(x.size(-1)) if x.dim() >= 2 else 1
+        if self.input_norm is None or self.input_norm.num_features != input_dim:
+            self.input_norm = nn.BatchNorm1d(input_dim).to(x.device)
+            # A module created here (fallback path, mismatched dim) is fresh and
+            # defaults to train() regardless of the parent's current mode -- sync
+            # it so eval-mode inference doesn't silently use batch statistics.
+            self.input_norm.train(self.training)
+        return self.input_norm
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Dense inputs go through one projection.
         if self.node_encoding == "dense":
             x = x.float()
+            # Raw atom features mix wildly different scales (atomic_num up to ~118,
+            # formal_charge/aromatic in {0,1}, ...) -- normalize before the linear
+            # projection so no single feature dominates the gradient.
+            input_norm = self._ensure_input_norm(x)
             proj = self._ensure_dense_projection(x)
-            return proj(x)
+            if x.size(0) <= 1:
+                # BatchNorm1d can't compute batch statistics from a single row (raises
+                # "Expected more than 1 value per channel when training"). This is a
+                # real case here, not just a theoretical one: a PyG-batched graph has
+                # one row per atom, and a single-heavy-atom molecule (e.g. "C"/"N"/"S",
+                # all present in data/freesolv.csv) landing alone in an undersized
+                # trailing batch triggers it mid-training. Fall back to running
+                # statistics (eval-mode behavior) for just this call instead of crashing.
+                was_training = input_norm.training
+                input_norm.eval()
+                try:
+                    normalized = input_norm(x)
+                finally:
+                    input_norm.train(was_training)
+            else:
+                normalized = input_norm(x)
+            return proj(normalized)
 
         # Categorical fields are embedded one by one and then summed.
         x = x.long()
@@ -241,6 +281,21 @@ class LanguageEncoder(nn.Module):
                         nn.Dropout(dropout),
                     )
                 )
+            if self.freeze_language_backbone and self.text_model is not None:
+                self.text_model.eval()
+
+    def train(self, mode: bool = True):
+        """B1 fix: a frozen text backbone must never re-enter train() (dropout /
+        any norm running stats). nn.Module.train() recurses into children, so
+        without this override `outer_model.train()` silently re-activates the
+        backbone's dropout every epoch, giving noisy 'frozen' features and a
+        train/eval distribution shift. Trainable adapters/LoRA modules added on
+        top still follow `mode` because they live in `self.layers` / `text_proj`.
+        """
+        super().train(mode)
+        if self.freeze_language_backbone and self.text_model is not None:
+            self.text_model.eval()
+        return self
 
     def _pool_text_backbone(self, lang: Any, device: torch.device) -> torch.Tensor:
         # The HF text encoder works on raw SMILES strings or precomputed tensors.

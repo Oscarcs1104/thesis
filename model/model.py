@@ -98,6 +98,17 @@ class MultimodalModel(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
+    def train(self, mode: bool = True):
+        """B1 fix (belt-and-suspenders): keep the frozen HF text backbone in
+        eval() no matter how the outer model's mode is toggled. LanguageEncoder
+        already enforces this, but callers sometimes flip submodules directly.
+        """
+        super().train(mode)
+        text_model = getattr(self.language_encoder, "text_model", None)
+        if getattr(self.language_encoder, "freeze_language_backbone", False) and text_model is not None:
+            text_model.eval()
+        return self
+
     def _get_states(self, data: torch.nn.Module) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         # Read graph and language inputs once.
         x = data.x

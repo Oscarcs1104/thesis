@@ -55,9 +55,11 @@ class GraphLangCrossAttentionModel(nn.Module):
         self.text_model = AutoModel.from_pretrained(language_model_name, trust_remote_code=trust_remote_code)
         text_hidden = int(getattr(self.text_model.config, "hidden_size", hidden_dim))
         self.text_proj = nn.Linear(text_hidden, hidden_dim)
+        self.freeze_language_backbone = freeze_language_backbone
         if freeze_language_backbone:
             for parameter in self.text_model.parameters():
                 parameter.requires_grad = False
+            self.text_model.eval()
 
         self.graph_to_lang_attn = nn.ModuleList(
             [nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True, dropout=dropout) for _ in range(num_cross_layers)]
@@ -76,6 +78,13 @@ class GraphLangCrossAttentionModel(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(fused_dim, output_dim),
         )
+
+    def train(self, mode: bool = True):
+        """B1 fix: keep the frozen text backbone in eval() through outer train()."""
+        super().train(mode)
+        if getattr(self, "freeze_language_backbone", False):
+            self.text_model.eval()
+        return self
 
     def _encode_text_tokens(self, smiles_list, device: torch.device):
         encoded = self.text_tokenizer(smiles_list, padding=True, truncation=True, max_length=256, return_tensors="pt")
