@@ -1,12 +1,12 @@
 """One command to (re)build every dataset artifact deterministically.
 
-  1. download ESOL / FreeSolv / Lipophilicity from DeepChem with the SCAFFOLD
-     split, into data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
+  1. download ESOL / FreeSolv / Lipophilicity (raw MoleculeNet CSVs) and write a
+     frozen SCAFFOLD split to data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
   2. warm the PyG graph cache for every split CSV (OGB-style features)
   3. warm the graph cache for data/zinc15_250K.csv (generator pretraining pool)
 
-Nothing here is committed -- run this on a fresh clone before training. Needs
-`deepchem` installed (only this step does).
+No deepchem / tensorflow needed. Nothing here is committed -- run it on a fresh
+clone before training.
 
     python data_pipeline/prepare_all.py
     python data_pipeline/prepare_all.py --skip-download    # just rebuild caches
@@ -32,21 +32,16 @@ def main() -> None:
     ap.add_argument("--zinc-csv", default="data/zinc15_250K.csv")
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--skip-download", action="store_true")
-    ap.add_argument("--force", action="store_true", help="clear DeepChem's cache before downloading")
+    ap.add_argument("--force", action="store_true", help="re-download raw CSVs even if cached")
     args = ap.parse_args()
 
     out_base = Path(args.output_dir)
 
     if not args.skip_download:
-        from data_pipeline.download_deepchem_datasets import _download_one, _load_deepchem_module
+        from data_pipeline.download_molnet import download_one
 
-        dc = _load_deepchem_module()
         for molnet_name in _MOLNET:
-            _download_one(
-                dc=dc, dataset_name=molnet_name, base_dir=out_base / molnet_name,
-                featurizer_name="MolGraphConvFeaturizer", splitter="scaffold",
-                seed=args.seed, force=args.force,
-            )
+            download_one(molnet_name, out_base, split="scaffold", seed=args.seed, force=args.force)
 
     print("\n== warming graph caches ==")
     for molnet_name in _MOLNET:

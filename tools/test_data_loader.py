@@ -15,7 +15,7 @@ def test_load_graph_dataset_from_scaffold_split_csv():
     """
     train_csv = ROOT / "data" / "deepchem_molnet" / "delaney" / "csv" / "train.csv"
     if not train_csv.exists():
-        pytest.skip("run data_pipeline/prepare_all.py first (needs deepchem)")
+        pytest.skip("run data_pipeline/prepare_all.py first")
 
     from data_pipeline.data import load_graph_dataset
     from data_pipeline.features import ATOM_FEATURE_DIMS, BOND_FEATURE_DIMS

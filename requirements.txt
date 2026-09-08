@@ -1,13 +1,15 @@
 # Dependencies for the graph + SELFIES multimodal property predictor.
 #
 # --- Step 0: check which CUDA build your machine actually needs ---
-#   nvidia-smi   # look at "CUDA Version" in the header -- pick a torch index <= that version
-#   Available PyTorch indices: cu121, cu124, cu126, ... see https://pytorch.org/get-started/locally/
-#   If you don't own the Python install (permission errors writing to site-packages), add --user
-#   to every pip command below, or better, use your own conda env / venv (see README).
+#   nvidia-smi   # header shows the max CUDA the driver supports; pick a torch index <= that
+#   Blackwell GPUs (RTX PRO 4000/4500/5000/6000, RTX 50-series): compute capability sm_120 ->
+#     REQUIRES PyTorch >= 2.7 with a CUDA 12.8+ build. cu121/cu124 wheels have no sm_120 kernels
+#     and fail with "no kernel image is available for execution on the device".
+#   Indices: cu128, cu126, cu124, cu121, ... see https://pytorch.org/get-started/locally/
+#   Prefer a venv/conda env you own (see README).
 #
-# --- Step 1: PyTorch + CUDA (must be installed with the CUDA-specific index, not plain PyPI) ---
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cuXXX
+# --- Step 1: PyTorch + CUDA (install from the CUDA-specific index, not plain PyPI) ---
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128   # or the newest that fits
 #
 # --- Step 2: PyTorch Geometric ---
 #   pip install torch-geometric
@@ -47,7 +49,8 @@ pandas==2.3.3
 matplotlib==3.10.8
 
 # --- Optional, only needed for specific scripts ---
-# deepchem               # data_pipeline/prepare_all.py + download_deepchem_datasets.py (dataset download only)
+# deepchem               # ONLY data_pipeline/download_zinc15.py (regenerate the shipped ZINC csv);
+#                        # prepare_all.py no longer needs it -- it downloads raw MoleculeNet CSVs directly
 # fcd_torch              # tools/eval_generation.py -- FCD metric; without it FCD is reported as null
 # wandb                  # --use-wandb on any trainer
 # accelerate             # only if you load a HF model with device_map="auto"

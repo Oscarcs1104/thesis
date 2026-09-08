@@ -5,22 +5,25 @@ with the code; it is the reference for the thesis' methodology section.
 
 ## 1. Datasets
 
-Three MoleculeNet **regression** datasets, downloaded via DeepChem:
+Three MoleculeNet **regression** datasets. `data_pipeline/download_molnet.py`
+fetches the raw CSVs from DeepChem's public S3 bucket (no `deepchem` package /
+TensorFlow) — they are already in the original target units.
 
-| key | DeepChem loader | property | ~N |
+| key | raw file | property | ~N |
 |---|---|---|---|
-| `esol` | `load_delaney` | log-solubility (mol/L) | 1128 |
-| `freesolv` | `load_freesolv` | hydration free energy (kcal/mol) | 642 |
-| `lipo` | `load_lipo` | lipophilicity logD | 4200 |
+| `esol` | `delaney-processed.csv` | log-solubility (mol/L) | 1128 |
+| `freesolv` | `SAMPL.csv` | hydration free energy (kcal/mol) | 642 |
+| `lipo` | `Lipophilicity.csv` | lipophilicity logD | 4200 |
 
-Targets are exported in their **original units** (DeepChem's `undo_transforms` is
-applied), so RMSE/MAE are comparable to published numbers.
+SMILES are canonicalized and deduplicated by InChIKey (target averaged on a
+collision) before splitting.
 
 ## 2. Split
 
-**Bemis–Murcko scaffold split**, 80/10/10, from DeepChem
-(`--splitter scaffold`). One frozen split per dataset, produced by
-`data_pipeline/prepare_all.py` into
+**Bemis–Murcko scaffold split**, 80/10/10 (`data_pipeline/splitters.py`:
+deterministic, largest scaffold groups to train first — the same policy as
+DeepChem's `ScaffoldSplitter`, not guaranteed byte-identical to it). One frozen
+split per dataset, produced by `data_pipeline/prepare_all.py` into
 `data/deepchem_molnet/<name>/csv/{train,valid,test}.csv` and used *as-is* by
 every config (predictor ablations and classical baselines alike). No re-splitting
 per seed — so seed variance reflects model init / data order only, not split
@@ -144,11 +147,12 @@ independent of the predictor:
 
 ```bash
 pip install -r requirements.txt          # + torch/torch-geometric per that file
-pip install deepchem                     # dataset download only
-python data_pipeline/download_zinc15.py  # if data/zinc15_250K.csv is absent
-python data_pipeline/prepare_all.py      # scaffold splits + graph caches
+python data_pipeline/prepare_all.py      # download raw CSVs + scaffold splits + graph caches
 python scripts/run_baselines.py          # the predictor matrix -> results/baselines.csv
 ```
+
+`data/zinc15_250K.csv` ships in the repo. `data_pipeline/download_zinc15.py` (the
+only script that still needs `deepchem`) is just a fallback to regenerate it.
 
 Datasets, caches, checkpoints and fresh result CSVs are **not** committed
 (`.gitignore`); only `data/zinc15_250K.csv` and

@@ -37,22 +37,26 @@ Every entrypoint prepends the repo root to `sys.path`, so run them directly
 ```bash
 pip install -r requirements.txt        # read the header: torch + torch-geometric
                                        # install with the right CUDA index first
-pip install deepchem                   # dataset download only
 ```
 
-> **Windows note:** Smart App Control blocks RDKit's native DLL on this machine
-> (`ImportError: DLL load failed ... cDataStructs`). Use WSL2 / a Linux box /
-> Docker to actually run anything. `torch`, `xgboost`, `torch-geometric` load fine.
+> **Blackwell GPUs (RTX PRO / 50-series):** need PyTorch ≥ 2.7 with a CUDA 12.8+
+> build — `pip install torch --index-url https://download.pytorch.org/whl/cu128`.
+> Older `cu121`/`cu124` wheels have no `sm_120` kernels.
+>
+> **Windows:** Smart App Control blocks RDKit's native DLL
+> (`ImportError: DLL load failed ... cDataStructs`). Run on WSL2 / Linux / Docker.
 
 ## Data (once, on a fresh clone)
 
 ```bash
-python data_pipeline/download_zinc15.py            # if data/zinc15_250K.csv is missing
-python data_pipeline/prepare_all.py               # scaffold splits + OGB graph caches
+python data_pipeline/prepare_all.py   # downloads raw CSVs + scaffold splits + OGB graph caches
 ```
 
-Produces `data/deepchem_molnet/<name>/csv/{train,valid,test}.csv` (frozen scaffold
-split) for `delaney` (=esol), `freesolv`, `lipo`. Nothing under `data/` is
+Downloads the raw MoleculeNet CSVs from DeepChem's public S3 bucket (no `deepchem`
+/ TensorFlow) and writes `data/deepchem_molnet/<name>/csv/{train,valid,test}.csv`
+(frozen scaffold split) for `delaney` (=esol), `freesolv`, `lipo`.
+`data/zinc15_250K.csv` ships in the repo; `data_pipeline/download_zinc15.py` (the
+one script that still needs `deepchem`) only regenerates it. Nothing under `data/` is
 committed except `zinc15_250K.csv`.
 
 ## Predictor
