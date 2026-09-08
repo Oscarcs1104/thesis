@@ -54,8 +54,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--splitter",
         type=str,
-        default="random",
-        help="DeepChem splitter to use when generating the cached splits",
+        default="scaffold",
+        choices=["scaffold", "random", "stratified"],
+        help="DeepChem splitter for the cached train/valid/test split. The thesis uses "
+        "'scaffold' for every dataset so numbers are comparable to MoleculeNet / Chemprop.",
     )
     parser.add_argument(
         "--seed",

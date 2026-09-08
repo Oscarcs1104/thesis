@@ -80,11 +80,14 @@ def _csv_path_to_graphs(csv_path: Path) -> list[Data]:
         if smiles_col is None:
             smiles_col = reader.fieldnames[0]
 
-        target_col = None
-        for name in reader.fieldnames:
-            if name and name.lower() != smiles_col.lower():
-                target_col = name
-                break
+        non_smiles = [name for name in reader.fieldnames if name and name.lower() != smiles_col.lower()]
+        target_col = non_smiles[0] if non_smiles else None
+        if len(non_smiles) > 1:
+            print(
+                f"[data] {csv_path.name}: {len(non_smiles)} non-SMILES columns {non_smiles}; "
+                f"using '{target_col}' as the regression target. Pass an explicit single-target "
+                f"CSV if that's wrong."
+            )
 
         data_list: list[Data] = []
         for row in reader:
@@ -251,7 +254,15 @@ def load_graph_dataset(path: str) -> list[Data]:
 
     graph_path = Path(raw_path)
     if graph_path.is_file() and graph_path.suffix.lower() in {".csv", ".gz"}:
-        cache_path = graph_path.with_suffix(".graphs.pt") if graph_path.suffix.lower() == ".csv" else graph_path.with_name(f"{graph_path.stem}.graphs.pt")
+        # Cache key carries the feature-schema version so a schema change (e.g. the
+        # move to OGB-style integer features) invalidates every stale *.graphs cache
+        # instead of silently reusing it with the wrong encoding.
+        try:
+            from data_pipeline.features import FEATURE_VERSION
+        except Exception:
+            FEATURE_VERSION = "v0"
+        stem = graph_path.name[: -len(graph_path.suffix)]
+        cache_path = graph_path.with_name(f"{stem}.graphs.{FEATURE_VERSION}.pt")
         if cache_path.exists():
             return _torch_load(cache_path)
         graphs = _csv_path_to_graphs(graph_path)

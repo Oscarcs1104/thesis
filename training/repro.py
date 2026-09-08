@@ -181,18 +181,22 @@ class TargetStandardizer:
 def regression_metrics(
     preds: torch.Tensor,
     targets: torch.Tensor,
-    target_range: Optional[tuple] = None,
+    target_std: Optional[float] = None,
 ) -> Dict[str, float]:
+    """RMSE (headline, in the target's own units) + MAE + MSE.
+
+    ``nrmse`` = RMSE / std(train targets) -- a scale-free number comparable across
+    the three datasets. std, not range (max-min), so a single extreme value in a
+    small test set (FreeSolv) doesn't distort it. Pass ``target_std`` computed on
+    the TRAIN split only; NaN if unavailable.
+    """
     preds = preds.detach().cpu().float().view(-1)
     targets = targets.detach().cpu().float().view(-1)
     mse = torch.mean((preds - targets) ** 2).item()
     mae = torch.mean(torch.abs(preds - targets)).item()
     rmse = math.sqrt(mse)
-    out = {"mse": mse, "rmse": rmse, "mae": mae}
-    if target_range is not None and target_range[1] > target_range[0]:
-        out["nrmse"] = rmse / (target_range[1] - target_range[0])
-    else:
-        out["nrmse"] = float("nan")
+    out = {"rmse": rmse, "mae": mae, "mse": mse}
+    out["nrmse"] = rmse / target_std if (target_std is not None and target_std > 0) else float("nan")
     return out
 
 
@@ -212,7 +216,7 @@ def aggregate_seed_metrics(per_seed: Iterable[Dict[str, float]]) -> Dict[str, Di
     return agg
 
 
-def format_seed_table(agg: Dict[str, Dict[str, float]], headline_keys: Iterable[str] = ("rmse", "nrmse", "mae")) -> str:
+def format_seed_table(agg: Dict[str, Dict[str, float]], headline_keys: Iterable[str] = ("rmse", "mae", "nrmse")) -> str:
     lines = ["", "=== Multi-seed test summary (mean +/- std) ==="]
     ordered = [k for k in headline_keys if k in agg] + [k for k in agg if k not in set(headline_keys)]
     for k in ordered:

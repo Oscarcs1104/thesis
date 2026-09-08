@@ -87,6 +87,24 @@ def encode_batch(texts: Sequence[str], vocab: Dict[str, Dict[str, int]], max_len
     return torch.tensor(inputs, dtype=torch.long, device=device), torch.tensor(targets, dtype=torch.long, device=device)
 
 
+def ids_to_token_string(token_ids: Sequence[int], id_to_token: Dict[int, str]) -> str:
+    """Join predicted token ids into the raw (SELFIES) token string, no decoding.
+
+    Special tokens are stripped and decoding stops at <END>. This is what SELFIES
+    validity is measured on (it should be ~100%); pass the result through
+    ``selfies.decoder`` to get SMILES and measure SMILES validity separately.
+    """
+    tokens: List[str] = []
+    for token_id in token_ids:
+        token = id_to_token.get(int(token_id), UNK_TOKEN)
+        if token in {PAD_TOKEN, START_TOKEN}:
+            continue
+        if token == END_TOKEN:
+            break
+        tokens.append(token)
+    return "".join(tokens)
+
+
 def decode_ids(token_ids: Sequence[int], id_to_token: Dict[int, str]) -> str:
     """Turn predicted token ids back into a molecule string."""
     tokens: List[str] = []
@@ -220,3 +238,42 @@ class SmilesDecoder(nn.Module):
                 generated.append(next_id)
 
         return decode_ids(generated, id_to_token)
+
+    @torch.no_grad()
+    def generate_batch(
+        self,
+        latent: torch.Tensor,
+        id_to_token: Dict[int, str],
+        max_len: int = 64,
+        temperature: float = 1.0,
+        sample: bool = True,
+        as_selfies: bool = False,
+    ) -> List[str]:
+        """Vectorized autoregressive decoding for a whole batch of latent prefixes.
+
+        latent: [B, hidden_dim]. Returns B molecule strings. Much faster than
+        calling ``generate`` B times when sampling thousands of molecules.
+        """
+        self.eval()
+        temperature = float(temperature) if float(temperature) > 0 else 1.0
+        batch_size = latent.size(0)
+        device = latent.device
+
+        tokens = torch.full((batch_size, 1), self.start_idx, dtype=torch.long, device=device)
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+        for _ in range(max_len):
+            hidden = self._encode(latent, tokens)
+            logits = self.output(hidden[:, -1]) / temperature
+            if sample:
+                probs = torch.softmax(logits, dim=-1)
+                next_ids = torch.multinomial(probs, num_samples=1).squeeze(-1)
+            else:
+                next_ids = logits.argmax(dim=-1)
+            next_ids = torch.where(finished, torch.full_like(next_ids, self.pad_idx), next_ids)
+            finished = finished | (next_ids == self.end_idx)
+            tokens = torch.cat([tokens, next_ids.unsqueeze(1)], dim=1)
+            if bool(finished.all()):
+                break
+
+        fn = ids_to_token_string if as_selfies else decode_ids
+        return [fn(row[1:], id_to_token) for row in tokens.tolist()]  # drop the <START> we seeded

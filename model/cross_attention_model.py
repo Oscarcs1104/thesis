@@ -9,16 +9,11 @@ architecture in model/model.py.
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence
-
 import torch
 import torch.nn as nn
 from torch_geometric.utils import to_dense_batch
 
-try:
-    from .encoders import GraphEncoder, _load_text_tokenizer
-except Exception:
-    from encoders import GraphEncoder, _load_text_tokenizer
+from model.encoders import GraphEncoder, _load_text_tokenizer
 
 
 class GraphLangCrossAttentionModel(nn.Module):
@@ -29,8 +24,6 @@ class GraphLangCrossAttentionModel(nn.Module):
         graph_backbone: str = "gin",
         num_layers: int = 3,
         dropout: float = 0.3,
-        node_encoding: str = "dense",
-        node_vocab_sizes: Optional[Sequence[int]] = None,
         language_model_name: str = "DeepChem/ChemBERTa-77M-MLM",
         freeze_language_backbone: bool = True,
         trust_remote_code: bool = False,
@@ -47,8 +40,6 @@ class GraphLangCrossAttentionModel(nn.Module):
             graph_backbone=graph_backbone,
             num_layers=num_layers,
             dropout=dropout,
-            node_encoding=node_encoding,
-            node_vocab_sizes=node_vocab_sizes,
         )
 
         self.text_tokenizer = _load_text_tokenizer(language_model_name, trust_remote_code)
@@ -96,11 +87,12 @@ class GraphLangCrossAttentionModel(nn.Module):
 
     def forward(self, data: torch.nn.Module) -> torch.Tensor:
         x, edge_index, batch = data.x, data.edge_index, data.batch
+        edge_attr = getattr(data, "edge_attr", None)
         smiles = getattr(data, "smiles", None)
         raw_texts = list(smiles) if isinstance(smiles, (list, tuple)) else [smiles]
         texts = ["" if item is None else str(item) for item in raw_texts]
 
-        node_state, _ = self.graph_encoder(x, edge_index, batch)
+        node_state, _ = self.graph_encoder(x, edge_index, edge_attr, batch)
         graph_seq, graph_mask = to_dense_batch(node_state, batch)  # (B, max_nodes, H), True = real node
         lang_seq, lang_mask = self._encode_text_tokens(texts, x.device)  # (B, L, H), True = real token
 
@@ -126,8 +118,6 @@ def build_cross_attention_model_from_args(args) -> GraphLangCrossAttentionModel:
         graph_backbone=args.graph_backbone,
         num_layers=args.num_layers,
         dropout=args.dropout,
-        node_encoding=args.node_encoding,
-        node_vocab_sizes=args.node_vocab_sizes,
         language_model_name=args.language_model_name,
         freeze_language_backbone=args.freeze_language_backbone,
         trust_remote_code=args.trust_remote_code,

@@ -24,7 +24,7 @@ from data_pipeline.splitters import split_dataset as split_dataset_by_strategy
 from model.moe_fusion_model import build_moe_model_from_args
 from training.repro import seed_everything
 from training.train import (
-    _target_range,
+    _target_std,
     load_graph_pretrained_checkpoint,
     load_predefined_datasets,
     resolve_predefined_split,
@@ -45,8 +45,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gin", choices=["gcn", "gat", "gatv2", "gin"])
-    parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
-    parser.add_argument("--node-vocab-sizes", type=int, nargs="*", default=[119, 4])
     parser.add_argument("--language-model-name", type=str, default="DeepChem/ChemBERTa-77M-MLM")
     parser.add_argument("--freeze-language-backbone", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -94,7 +92,7 @@ def main() -> None:
         train_set, val_set, test_set = split_dataset_by_strategy(
             dataset, args.split, args.train_ratio, args.val_ratio, args.test_ratio, args.seed, smiles_list=all_smiles
         )
-    target_range = _target_range(train_set)
+    target_std = _target_std(train_set)
 
     criterion = nn.MSELoss()
 
@@ -102,7 +100,7 @@ def main() -> None:
     if args.graph_pretrained_checkpoint:
         load_graph_pretrained_checkpoint(model, args.graph_pretrained_checkpoint)
     model = model.to(args.device)
-    run_predictor_ablation_training(model, args, train_set, val_set, test_set, target_range, criterion)
+    run_predictor_ablation_training(model, args, train_set, val_set, test_set, target_std, criterion)
 
 
 if __name__ == "__main__":

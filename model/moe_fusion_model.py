@@ -15,15 +15,12 @@ touches the main architecture in model/model.py.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
 
-try:
-    from .encoders import GraphEncoder, LanguageEncoder
-except Exception:
-    from encoders import GraphEncoder, LanguageEncoder
+from model.encoders import GraphEncoder, LanguageEncoder
 
 
 class GraphLangMoEModel(nn.Module):
@@ -34,8 +31,6 @@ class GraphLangMoEModel(nn.Module):
         graph_backbone: str = "gin",
         num_layers: int = 3,
         dropout: float = 0.3,
-        node_encoding: str = "dense",
-        node_vocab_sizes: Optional[Sequence[int]] = None,
         language_model_name: str = "DeepChem/ChemBERTa-77M-MLM",
         freeze_language_backbone: bool = True,
         trust_remote_code: bool = False,
@@ -52,8 +47,6 @@ class GraphLangMoEModel(nn.Module):
             graph_backbone=graph_backbone,
             num_layers=num_layers,
             dropout=dropout,
-            node_encoding=node_encoding,
-            node_vocab_sizes=node_vocab_sizes,
         )
         self.language_encoder = LanguageEncoder(
             hidden_dim=hidden_dim,
@@ -94,11 +87,12 @@ class GraphLangMoEModel(nn.Module):
     def forward(self, data: torch.nn.Module) -> Union[torch.Tensor, List[torch.Tensor]]:
         x = data.x
         edge_index = data.edge_index
+        edge_attr = getattr(data, "edge_attr", None)
         batch = data.batch
         smiles = getattr(data, "smiles", None)
         batch_size = int(batch.max().item()) + 1
 
-        _, layer_graph_states = self.graph_encoder(x, edge_index, batch)
+        _, layer_graph_states = self.graph_encoder(x, edge_index, edge_attr, batch)
         graph_state = layer_graph_states[-1]
         lang_state = self.language_encoder(smiles, batch_size=batch_size, device=x.device)
         fused = torch.cat([graph_state, lang_state], dim=-1)
@@ -121,8 +115,6 @@ def build_moe_model_from_args(args) -> GraphLangMoEModel:
         graph_backbone=args.graph_backbone,
         num_layers=args.num_layers,
         dropout=args.dropout,
-        node_encoding=args.node_encoding,
-        node_vocab_sizes=args.node_vocab_sizes,
         language_model_name=args.language_model_name,
         freeze_language_backbone=args.freeze_language_backbone,
         trust_remote_code=args.trust_remote_code,

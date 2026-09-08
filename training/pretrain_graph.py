@@ -1,13 +1,13 @@
 """Pretraining for the graph encoder (produces a checkpoint usable via
 train.py's --graph-pretrained-checkpoint).
 
-Default objective ("mtl"): masked node-attribute prediction + functional-group
-prediction + molecular-descriptor prediction, all from the GNN's own node/pooled
-states -- inspired by BerMol (C:\\CVAIL\\DTIAM\\code\\BerMol), adapted onto a real
-message-passing GraphEncoder instead of a substructure-transformer.
+Default objective ("mtl"): masked node-attribute prediction (per OGB feature
+column) + functional-group prediction + molecular-descriptor prediction, all from
+the GNN's own node/pooled states. This is the AttrMasking + supervised-property
+recipe from "Strategies for Pre-training GNNs" (Hu et al. 2020), on a
+message-passing GraphEncoder.
 
-The original contrastive (NT-Xent) objective is still available via
---objective contrastive.
+The contrastive (NT-Xent) objective is still available via --objective contrastive.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from data_pipeline.data import load_graph_dataset
+from data_pipeline.features import ATOM_FEATURE_DIMS
 from model.encoders import GraphEncoder
 from training.wandb_utils import add_wandb_args, wandb_finish, wandb_init, wandb_log
 
@@ -59,12 +60,14 @@ def _print_progress(prefix: str, current: int, total: int, start_time: float) ->
 # ---------------------------------------------------------------------------
 
 def _augment_view(graph):
+    """Edge-dropout augmentation. (Node features are integer category indices now,
+    so additive gaussian noise no longer makes sense -- dropping it.)"""
     view = graph.clone()
     if getattr(view, "edge_index", None) is not None and view.edge_index.numel() > 0:
-        mask = torch.rand(view.edge_index.size(1)) >= 0.15
-        view.edge_index = view.edge_index[:, mask]
-    if getattr(view, "x", None) is not None:
-        view.x = view.x + torch.randn_like(view.x) * 0.01
+        keep = torch.rand(view.edge_index.size(1)) >= 0.15
+        view.edge_index = view.edge_index[:, keep]
+        if getattr(view, "edge_attr", None) is not None and view.edge_attr.numel() > 0:
+            view.edge_attr = view.edge_attr[keep]
     return view
 
 
@@ -113,8 +116,8 @@ class GraphContrastivePretrainer:
         for step, (view_1, view_2) in enumerate(loader, start=1):
             view_1 = view_1.to(self.device)
             view_2 = view_2.to(self.device)
-            _, states_1 = self.encoder(view_1.x, view_1.edge_index, view_1.batch)
-            _, states_2 = self.encoder(view_2.x, view_2.edge_index, view_2.batch)
+            _, states_1 = self.encoder(view_1.x, view_1.edge_index, getattr(view_1, "edge_attr", None), view_1.batch)
+            _, states_2 = self.encoder(view_2.x, view_2.edge_index, getattr(view_2, "edge_attr", None), view_2.batch)
             loss = self._nt_xent(self.proj(states_1[-1]), self.proj(states_2[-1]))
             self.opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -220,14 +223,15 @@ def _collate_mtl(items):
 
 
 def _mask_node_features(x: torch.Tensor, mask_prob: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Zero out mask_prob of node rows. Returns (masked_x, mask, original_values_at_mask)."""
+    """Replace mask_prob of node rows with index 0 in every feature column (the
+    "masked atom" token). Returns (masked_x, mask, original_indices_at_mask [K, 9] long)."""
     num_nodes = x.size(0)
     mask = torch.rand(num_nodes, device=x.device) < mask_prob
     if not mask.any():
         mask[0] = True
-    original = x[mask].clone()
-    masked_x = x.clone()
-    masked_x[mask] = 0.0
+    original = x[mask].clone().long()
+    masked_x = x.clone().long()
+    masked_x[mask] = 0
     return masked_x, mask, original
 
 
@@ -236,7 +240,7 @@ class GraphMultiTaskPretrainer:
         self,
         encoder: GraphEncoder,
         hidden_dim: int,
-        node_feat_dim: int,
+        atom_feature_dims: List[int],
         num_fg: int,
         num_desc: int,
         device: str,
@@ -252,7 +256,8 @@ class GraphMultiTaskPretrainer:
         self.fg_loss_weight = fg_loss_weight
         self.desc_loss_weight = desc_loss_weight
 
-        self.mask_head = nn.Linear(hidden_dim, node_feat_dim).to(self.device)
+        # one classification head per OGB atom-feature column (AttrMasking)
+        self.mask_heads = nn.ModuleList([nn.Linear(hidden_dim, d) for d in atom_feature_dims]).to(self.device)
         self.fg_head = nn.Linear(hidden_dim, num_fg).to(self.device)
         self.desc_head = nn.Sequential(
             nn.Dropout(0.1),
@@ -263,7 +268,7 @@ class GraphMultiTaskPretrainer:
 
         params = (
             list(self.encoder.parameters())
-            + list(self.mask_head.parameters())
+            + list(self.mask_heads.parameters())
             + list(self.fg_head.parameters())
             + list(self.desc_head.parameters())
         )
@@ -273,7 +278,7 @@ class GraphMultiTaskPretrainer:
 
     def train_epoch(self, loader: DataLoader, on_batch_end=None) -> Dict[str, float]:
         self.encoder.train()
-        self.mask_head.train()
+        self.mask_heads.train()
         self.fg_head.train()
         self.desc_head.train()
 
@@ -285,10 +290,14 @@ class GraphMultiTaskPretrainer:
             fg_labels = fg_labels.to(self.device)
 
             masked_x, mask, original = _mask_node_features(batch.x, self.mask_prob)
-            node_state, _ = self.encoder(masked_x, batch.edge_index, batch.batch)
+            node_state, _ = self.encoder(masked_x, batch.edge_index, getattr(batch, "edge_attr", None), batch.batch)
             pooled = global_mean_pool(node_state, batch.batch)
 
-            mask_loss = F.mse_loss(self.mask_head(node_state[mask]), original)
+            masked_state = node_state[mask]
+            mask_loss = sum(
+                F.cross_entropy(head(masked_state), original[:, col])
+                for col, head in enumerate(self.mask_heads)
+            ) / len(self.mask_heads)
             fg_loss = self.fg_criterion(self.fg_head(pooled), fg_labels)
             desc_loss = self.desc_criterion(self.desc_head(pooled), desc_labels)
             loss = self.mask_loss_weight * mask_loss + self.fg_loss_weight * fg_loss + self.desc_loss_weight * desc_loss
@@ -320,7 +329,6 @@ def train_graph(
     graph_backbone: str = "gatv2",
     device: str = "cpu",
     batch_size: int = 64,
-    node_encoding: str = "dense",
     num_workers: int = 0,
     mask_prob: float = 0.15,
     mask_loss_weight: float = 1.0,
@@ -329,7 +337,7 @@ def train_graph(
     label_jobs: int = -1,
     wandb_run=None,
 ) -> None:
-    encoder = GraphEncoder(hidden_dim=hidden_dim, graph_backbone=graph_backbone, num_layers=num_layers, dropout=dropout, node_encoding=node_encoding)
+    encoder = GraphEncoder(hidden_dim=hidden_dim, graph_backbone=graph_backbone, num_layers=num_layers, dropout=dropout)
     extra_checkpoint_data = {}
 
     if objective == "contrastive":
@@ -338,17 +346,17 @@ def train_graph(
             ContrastiveGraphDataset(graphs),
             batch_size=batch_size,
             shuffle=True,
+            drop_last=True,
             num_workers=num_workers,
             persistent_workers=num_workers > 0,
             collate_fn=_collate_views,
         )
     else:
         kept_graphs, desc_labels, fg_labels, fg_vocab, desc_mean, desc_std = _build_pretrain_labels(graphs, n_jobs=label_jobs)
-        node_feat_dim = kept_graphs[0].x.size(-1)
         trainer = GraphMultiTaskPretrainer(
             encoder=encoder,
             hidden_dim=hidden_dim,
-            node_feat_dim=node_feat_dim,
+            atom_feature_dims=ATOM_FEATURE_DIMS,
             num_fg=len(fg_vocab),
             num_desc=len(_DESCRIPTOR_NAMES),
             device=device,
@@ -361,6 +369,7 @@ def train_graph(
             MolPretrainDataset(kept_graphs, desc_labels, fg_labels),
             batch_size=batch_size,
             shuffle=True,
+            drop_last=True,
             num_workers=num_workers,
             persistent_workers=num_workers > 0,
             collate_fn=_collate_mtl,
@@ -406,7 +415,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--graph-backbone", type=str, default="gatv2", choices=["gcn", "gat", "gatv2", "gin"])
-    parser.add_argument("--node-encoding", type=str, default="dense", choices=["categorical", "dense"])
     parser.add_argument("--mask-prob", type=float, default=0.15, help="Fraction of nodes masked for the mtl objective's masked-attribute task")
     parser.add_argument("--mask-loss-weight", type=float, default=1.0)
     parser.add_argument("--fg-loss-weight", type=float, default=50.0)
@@ -430,7 +438,6 @@ def main() -> None:
         graph_backbone=args.graph_backbone,
         device=args.device,
         batch_size=args.batch_size,
-        node_encoding=args.node_encoding,
         num_workers=args.num_workers,
         mask_prob=args.mask_prob,
         mask_loss_weight=args.mask_loss_weight,

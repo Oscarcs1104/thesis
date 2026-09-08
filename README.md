@@ -1,85 +1,127 @@
-# Graph + SELFIES Multimodal Property Predictor
+# Multimodal molecular property prediction + conditional generation
 
-This folder contains a standalone multimodal molecular model that:
+- **Predictor**: a graph encoder (GIN-E over OGB-style atom/bond features) +
+  a HuggingFace text encoder (ChemBERTa on raw SMILES). Three fusion
+  architectures are compared — **concat**, **cross-attention**, **gated MoE** —
+  and a **stacked ensemble** of the three (MLP meta-learner) is the reported final
+  predictor. Unimodal
+  ablations (graph-only, language-only frozen / fine-tuned) and a classical
+  **ECFP4 + XGBoost / MLP** reference run in the same matrix.
+- **Generator** (separate model): a 6-layer decoder-only transformer over SELFIES,
+  pretrained on ZINC-250k and fine-tuned to condition on a **target property
+  value** (quantile-bin token). Decoupled from the predictor on purpose.
 
-- uses a graph encoder with selectable backbone: `gcn`, `gat`, `gatv2`, or `gin`
-- uses a language branch driven by any HuggingFace text encoder (`--language-model-name`), e.g. ChemBERTa or MoLFormer, fed the molecule's raw SMILES
-- fuses both branches by concatenation, then predicts the target property with an MLP head
-- can disable the language branch entirely with `--no-use-language`
-- optionally trains a SELFIES decoder to generate new, valid molecules conditioned on the fused representation and a target property
+The full evaluation protocol — datasets, scaffold split, every config, every
+metric — is in **[docs/evaluation.md](docs/evaluation.md)**.
 
-## Folder layout
+## Layout
 
 ```
-model/            MultimodalModel, GraphEncoder/LanguageEncoder, SmilesDecoder (SELFIES)
-training/         train.py (predictor / joint / decoder modes), pretrain_graph.py, pretrain_selfies.py
-data_pipeline/    dataset loading, SMILES->PyG conversion, MoleculeNet download
-tools/            demo_generate_property.py, ploting.py, test_data_loader.py
-data/             raw + cached datasets (unchanged by scripts above)
-checkpoints/      saved training runs
+model/            MultimodalModel, Graph/LanguageEncoder, AtomEncoder/BondEncoder,
+                  SmilesDecoder, ConditionalSmilesGenerator, cross-attn / MoE variants
+training/         train.py (predictor), train_cross_attention.py, train_moe_fusion.py,
+                  pretrain_graph.py, train_generator.py (pretrain + conditional finetune)
+data_pipeline/    features.py (OGB featurization), prepare_all.py, download_*,
+                  convert_smiles_to_pyg.py, pseudo_label_zinc.py, splitters.py
+baselines/        ecfp_baseline.py (ECFP4 + descriptors -> XGBoost / MLP)
+scripts/          run_baselines.py (the standardized matrix)
+tools/            eval_generation.py, demo_generate_property.py, check_diversity.py, ploting.py
+docs/             evaluation.md
 ```
 
-All entrypoint scripts add the project root to `sys.path`, so they can be run directly, e.g. `python training/train.py ...` from the `test/` folder.
+Every entrypoint prepends the repo root to `sys.path`, so run them directly
+(`python training/train.py ...`) from the repo root.
 
-## Expected input
+## Setup
 
-The trainer expects a saved list of PyG `Data` objects or an `InMemoryDataset` serialized with `torch.save`.
+```bash
+pip install -r requirements.txt        # read the header: torch + torch-geometric
+                                       # install with the right CUDA index first
+pip install deepchem                   # dataset download only
+```
 
-Each graph should provide:
+> **Windows note:** Smart App Control blocks RDKit's native DLL on this machine
+> (`ImportError: DLL load failed ... cDataStructs`). Use WSL2 / a Linux box /
+> Docker to actually run anything. `torch`, `xgboost`, `torch-geometric` load fine.
 
-- `x`: node features
-- `edge_index`: graph connectivity
-- `y`: target property
-- `smiles` optional: SMILES string. Fed raw (no SELFIES conversion) to the HuggingFace language branch, and required for the SELFIES decoder (`--use-decoder`)
+## Data (once, on a fresh clone)
 
-If `x` contains categorical node indices like MolPROP, keep `--node-encoding categorical` and use the correct `--node-vocab-sizes`.
+```bash
+python data_pipeline/download_zinc15.py            # if data/zinc15_250K.csv is missing
+python data_pipeline/prepare_all.py               # scaffold splits + OGB graph caches
+```
 
-## Training example
+Produces `data/deepchem_molnet/<name>/csv/{train,valid,test}.csv` (frozen scaffold
+split) for `delaney` (=esol), `freesolv`, `lipo`. Nothing under `data/` is
+committed except `zinc15_250K.csv`.
 
-Property prediction only (graph encoder + HuggingFace text encoder -> concat -> MLP):
+## Predictor
+
+Standardized matrix — 3 datasets × 8 trained configs × 3 seeds + the ensemble →
+one CSV (`ecfp-xgb`, `ecfp-mlp`, `graph-only`, `lang-only-frozen`,
+`lang-only-unfrozen`, `fusion-concat`, `fusion-xattn`, `fusion-moe`, `ensemble`):
+
+```bash
+python scripts/run_baselines.py                    # -> results/baselines.csv
+python scripts/run_baselines.py --datasets esol --configs fusion-concat fusion-xattn fusion-moe ensemble
+```
+
+`ensemble` = **stacked**: a small MLP meta-learner (`baselines/stacking.py`) trained
+on the three fusion models' *validation* predictions, evaluated on their *test*
+predictions. `run_baselines.py` pulls in the three `fusion-*` configs
+automatically and also reports `ensemble-avg` (plain mean, the reference to beat)
+and `ensemble-all` (one stacker over all 3×3 checkpoints). See
+[docs/evaluation.md](docs/evaluation.md) for the leakage/holdout details.
+
+Single fusion run:
 
 ```bash
 python training/train.py \
-  --data-path data/esol.csv,data/freesolv.csv,data/lipo.csv \
-  --task regression \
-  --graph-backbone gatv2 \
-  --language-backbone huggingface \
-  --language-model-name DeepChem/ChemBERTa-77M-MLM \
-  --use-language \
-  --hidden-dim 256 \
-  --num-layers 3 \
-  --batch-size 32 \
-  --epochs 100 \
-  --training-mode predictor
+  --dataset-dir data/deepchem_molnet/delaney \
+  --graph-backbone gin --epochs 100 --seeds 2025 2026 2027       # fusion-concat
+python training/train_cross_attention.py --dataset-dir data/deepchem_molnet/delaney --epochs 100
+python training/train_moe_fusion.py      --dataset-dir data/deepchem_molnet/delaney --epochs 100
 ```
 
-Joint training of the predictor and the SELFIES decoder together:
+`--no-use-language` → graph-only; `--no-use-graph` → language-only.
+
+Optional (not in the reported matrix): graph-encoder pretraining on ZINC via
+`training/pretrain_graph.py --objective mtl` + `--graph-pretrained-checkpoint`.
+
+## Generator (plan Days 8–10)
 
 ```bash
-python training/train.py --data-path data/esol.csv --use-decoder --training-mode joint
+# 1. unconditional pretrain on ZINC SELFIES
+python training/train_generator.py --mode pretrain \
+  --smiles-csv data/zinc15_250K.csv --out checkpoints/gen_pretrain.pt
+
+# 2. pseudo-label ZINC with a trained predictor (fusion-concat is enough here)
+python data_pipeline/pseudo_label_zinc.py \
+  --predictor-checkpoint checkpoints/baselines/esol_fusion-concat_s2025.pt \
+  --smiles-csv data/zinc15_250K.csv --out data/zinc15_250K.pseudo_esol.csv
+
+# 3. conditional fine-tune (bins from the dataset's own train targets)
+python training/train_generator.py --mode finetune \
+  --load-generator checkpoints/gen_pretrain.pt \
+  --smiles-csv data/zinc15_250K.pseudo_esol.csv \
+  --property-ref-csv data/deepchem_molnet/delaney/csv/train.csv \
+  --property-name esol --out checkpoints/gen_esol_finetune.pt
+
+# 4. evaluate: validity / uniqueness / novelty / diversity / FCD / MAD
+python tools/eval_generation.py \
+  --generator-checkpoint checkpoints/gen_esol_finetune.pt \
+  --predictor-checkpoint checkpoints/baselines/esol_fusion-concat_s2025.pt \
+  --train-csv data/deepchem_molnet/delaney/csv/train.csv \
+  --num-samples 10000 --out results/generation_esol.json
 ```
 
-Autoregressive decoder-only training on top of an existing predictor checkpoint (freezes everything except the decoder):
+## Status
 
-```bash
-python training/train.py --data-path data/esol.csv --use-decoder --training-mode decoder \
-  --load-checkpoint checkpoints/best.pt
-```
-
-## Pretraining
-
-```bash
-python training/pretrain_graph.py --data-path data/esol.csv --out graph_pretrain.pt
-python training/pretrain_selfies.py --smiles-file data/some_smiles.txt --out selfies_pretrain.pt
-```
-
-`pretrain_graph.py` output can be fed back into `train.py` via `--graph-pretrained-checkpoint`.
-`pretrain_selfies.py` is exploratory/independent — it is not auto-loaded by `train.py`'s HuggingFace language branch.
-
-## Notes
-
-- If you want a graph-only baseline, use `--no-use-language` and `--language-backbone none`.
-- Some `trust_remote_code=True` HF repos ship a broken tokenizer `auto_map` (seen with `DeepChem/MoLFormer-c3-1.1B`); `LanguageEncoder` automatically falls back to loading `tokenizer.json` directly in that case.
-- If your graph tensors are dense float features instead of categorical indices, switch to `--node-encoding dense`.
-- The default categorical node vocabulary sizes match the simplified MolPROP atom representation: atom type + chirality.
-- Checkpoints saved by `train.py` include `args` and `decoder_vocab`, so `tools/demo_generate_property.py` can reload a model without re-specifying every flag.
+- [x] OGB-standard graph features (GIN-E with bond features)
+- [x] Scaffold split enforced everywhere; one results table
+- [x] Classical ECFP4 baseline (XGBoost / MLP) as a first-class config
+- [x] Three fusion architectures compared (concat / cross-attention / MoE); ensemble = final predictor
+- [x] RMSE headline metric; NRMSE = RMSE / train-std
+- [x] Data reproducible from a clean clone (`prepare_all.py`); stale results archived
+- [x] Conditional generator that actually conditions on the target property
+- [ ] run the matrix + generator on GPU / WSL2 and fill `results/`

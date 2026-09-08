@@ -1,16 +1,18 @@
+"""Multimodal property predictor: graph encoder + language encoder -> concat -> MLP head.
+
+Predictor only. Molecule *generation* is a separate, standalone model
+(`model/conditional_generator.py`) trained by `training/train_generator.py`; it is
+deliberately decoupled from this predictor so the two contributions can be
+evaluated independently (see docs/evaluation.md).
+"""
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 
-try:
-    from .encoders import GraphEncoder, LanguageEncoder, VALID_GRAPH_BACKBONES
-    from .smiles_decoder import SmilesDecoder
-except Exception:
-    from encoders import GraphEncoder, LanguageEncoder, VALID_GRAPH_BACKBONES
-    from smiles_decoder import SmilesDecoder
+from model.encoders import VALID_GRAPH_BACKBONES, GraphEncoder, LanguageEncoder
 
 
 class MultimodalModel(nn.Module):
@@ -22,18 +24,11 @@ class MultimodalModel(nn.Module):
         language_backbone: str = "huggingface",
         num_layers: int = 3,
         dropout: float = 0.3,
-        node_encoding: str = "categorical",
-        node_vocab_sizes: Optional[Sequence[int]] = None,
         use_graph: bool = True,
         use_language: bool = True,
-        language_model_name: str = "seyonec/ChemBERTa-zinc-base-v1",
+        language_model_name: str = "DeepChem/ChemBERTa-77M-MLM",
         freeze_language_backbone: bool = True,
         trust_remote_code: bool = False,
-        use_decoder: bool = False,
-        decoder_vocab_size: int | None = None,
-        decoder_pad_idx: int = 0,
-        decoder_start_idx: int = 1,
-        decoder_end_idx: int = 2,
     ) -> None:
         super().__init__()
 
@@ -49,8 +44,7 @@ class MultimodalModel(nn.Module):
         self.use_graph = use_graph
         self.use_language = use_language and self.language_backbone != "none"
         if not self.use_graph and not self.use_language:
-            raise ValueError("At least one of use_graph or use_language must be enabled")
-        self.use_decoder = use_decoder
+            raise ValueError("At least one of use_graph / use_language must be enabled")
         self.dropout = nn.Dropout(dropout)
 
         self.graph_encoder = GraphEncoder(
@@ -58,8 +52,6 @@ class MultimodalModel(nn.Module):
             graph_backbone=graph_backbone,
             num_layers=num_layers,
             dropout=dropout,
-            node_encoding=node_encoding,
-            node_vocab_sizes=node_vocab_sizes,
         )
         self.language_encoder = LanguageEncoder(
             hidden_dim=hidden_dim,
@@ -72,18 +64,6 @@ class MultimodalModel(nn.Module):
             trust_remote_code=trust_remote_code,
         )
 
-        self.decoder = None
-        if self.use_decoder:
-            if decoder_vocab_size is None:
-                raise ValueError("decoder_vocab_size is required when use_decoder=True")
-            self.decoder = SmilesDecoder(
-                hidden_dim=hidden_dim,
-                vocab_size=decoder_vocab_size,
-                pad_idx=decoder_pad_idx,
-                start_idx=decoder_start_idx,
-                end_idx=decoder_end_idx,
-            )
-
         fused_dim = hidden_dim * (int(self.use_graph) + int(self.use_language))
         self.head = nn.Sequential(
             nn.Linear(fused_dim, fused_dim),
@@ -92,141 +72,37 @@ class MultimodalModel(nn.Module):
             nn.Linear(fused_dim, output_dim),
         )
 
-        self.decoder_condition_proj = nn.Sequential(
-            nn.Linear(fused_dim + max(1, output_dim), hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
-
     def train(self, mode: bool = True):
-        """B1 fix (belt-and-suspenders): keep the frozen HF text backbone in
-        eval() no matter how the outer model's mode is toggled. LanguageEncoder
-        already enforces this, but callers sometimes flip submodules directly.
-        """
+        """Belt-and-suspenders: keep a frozen HF text backbone in eval()."""
         super().train(mode)
         text_model = getattr(self.language_encoder, "text_model", None)
         if getattr(self.language_encoder, "freeze_language_backbone", False) and text_model is not None:
             text_model.eval()
         return self
 
-    def _get_states(self, data: torch.nn.Module) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
-        # Read graph and language inputs once.
-        x = data.x
-        edge_index = data.edge_index
+    def _get_states(self, data) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         batch = data.batch
-        smiles = getattr(data, "smiles", None)
-
         batch_size = int(batch.max().item()) + 1
         graph_state = None
         if self.use_graph:
-            _, layer_graph_states = self.graph_encoder(x, edge_index, batch)
+            _, layer_graph_states = self.graph_encoder(
+                data.x, data.edge_index, getattr(data, "edge_attr", None), batch
+            )
             graph_state = layer_graph_states[-1]
-        lang_state = self.language_encoder(smiles, batch_size=batch_size, device=x.device)
+        lang_state = self.language_encoder(getattr(data, "smiles", None), batch_size=batch_size, device=batch.device)
         return graph_state, lang_state
 
-    def encode(self, data: torch.nn.Module) -> torch.Tensor:
+    def encode(self, data) -> torch.Tensor:
         graph_state, lang_state = self._get_states(data)
         if self.use_graph and self.use_language:
             return torch.cat([graph_state, lang_state], dim=-1)
         return graph_state if self.use_graph else lang_state
 
-    def _build_decoder_latent(self, fused_feat: torch.Tensor, property_values: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if property_values is None:
-            # Unconditional pretraining (e.g. unlabeled ZINC): pad with a zero placeholder so
-            # decoder_condition_proj still sees its expected fused_dim + max(1, output_dim) width.
-            prop = torch.zeros(fused_feat.size(0), max(1, self.output_dim), device=fused_feat.device, dtype=fused_feat.dtype)
-        else:
-            prop = property_values.float()
-            if prop.dim() == 0:
-                prop = prop.unsqueeze(0)
-            if prop.dim() == 1:
-                prop = prop.unsqueeze(-1)
-            if prop.size(0) != fused_feat.size(0):
-                if prop.numel() == 1:
-                    prop = prop.expand(fused_feat.size(0), -1)
-                else:
-                    raise ValueError(f"Property values batch size {prop.size(0)} does not match fused feature batch size {fused_feat.size(0)}")
-            if prop.size(-1) != self.output_dim and self.output_dim == 1:
-                prop = prop.view(-1, 1)
-            elif prop.size(-1) != self.output_dim:
-                raise ValueError(f"Property values have {prop.size(-1)} dims but model expects {self.output_dim}")
-
-        cond_input = torch.cat([fused_feat, prop], dim=-1)
-        return self.decoder_condition_proj(cond_input)
-
-    def forward(
-        self,
-        data: torch.nn.Module,
-        decoder_input_ids: Optional[torch.Tensor] = None,
-        return_aux: bool = False,
-        property_values: Optional[torch.Tensor] = None,
-        decoder_context_dropout_mask: Optional[torch.Tensor] = None,
-    ):
-        fused_feat = self.encode(data)
-
-        logits = self.head(fused_feat)
-
-        decoder_context = fused_feat
-        if decoder_context_dropout_mask is not None:
-            # Zero out the molecule-derived context for the flagged samples so the decoder can only
-            # rely on property_values to pick a target molecule -- otherwise fused_feat already fully
-            # determines the (single, fixed) training target and the property signal stays unused.
-            keep = 1.0 - decoder_context_dropout_mask.to(fused_feat.dtype).view(-1, 1)
-            decoder_context = fused_feat * keep
-
-        decoder_latent = self._build_decoder_latent(decoder_context, property_values=property_values)
-        decoder_logits = self.decoder(decoder_latent, decoder_input_ids) if self.decoder is not None and decoder_input_ids is not None else None
-
-        if not return_aux:
-            return (logits, decoder_logits) if decoder_logits is not None else logits
-
-        result = {"fused": fused_feat, "logits": logits}
-        if decoder_logits is not None:
-            result["decoder_logits"] = decoder_logits
-        return result
-
-    def generate_smiles(self, data: torch.nn.Module, id_to_token: dict[int, str], max_len: int = 64, property_values: Optional[torch.Tensor] = None) -> str:
-        if self.decoder is None:
-            raise ValueError("Decoder is disabled")
-
-        self.eval()
-        with torch.no_grad():
-            fused_feat = self.encode(data)
-            decoder_latent = self._build_decoder_latent(fused_feat, property_values=property_values)
-            return self.decoder.generate(decoder_latent, id_to_token, max_len=max_len)
-
-    def generate_smiles_candidates(
-        self,
-        data: torch.nn.Module,
-        id_to_token: dict[int, str],
-        max_len: int = 64,
-        num_samples: int = 10,
-        temperature: float = 1.0,
-        property_values: Optional[torch.Tensor] = None,
-    ) -> List[str]:
-        if self.decoder is None:
-            raise ValueError("Decoder is disabled")
-
-        self.eval()
-        candidates: List[str] = []
-        with torch.no_grad():
-            fused_feat = self.encode(data)
-            decoder_latent = self._build_decoder_latent(fused_feat, property_values=property_values)
-            for _ in range(max(1, num_samples)):
-                candidates.append(
-                    self.decoder.generate(
-                        decoder_latent,
-                        id_to_token,
-                        max_len=max_len,
-                        temperature=temperature,
-                        sample=True,
-                    )
-                )
-        return candidates
+    def forward(self, data) -> torch.Tensor:
+        return self.head(self.encode(data))
 
 
 def build_model_from_args(args) -> MultimodalModel:
-    # Train code only passes parsed arguments; this keeps model construction in one place.
     return MultimodalModel(
         hidden_dim=args.hidden_dim,
         output_dim=args.output_dim,
@@ -234,16 +110,9 @@ def build_model_from_args(args) -> MultimodalModel:
         language_backbone=args.language_backbone,
         num_layers=args.num_layers,
         dropout=args.dropout,
-        node_encoding=args.node_encoding,
-        node_vocab_sizes=args.node_vocab_sizes,
         use_graph=getattr(args, "use_graph", True),
         use_language=args.use_language,
         language_model_name=getattr(args, "language_model_name", "DeepChem/ChemBERTa-77M-MLM"),
         freeze_language_backbone=getattr(args, "freeze_language_backbone", True),
         trust_remote_code=getattr(args, "trust_remote_code", False),
-        use_decoder=getattr(args, "use_decoder", False),
-        decoder_vocab_size=getattr(args, "decoder_vocab_size", None),
-        decoder_pad_idx=getattr(args, "decoder_pad_idx", 0),
-        decoder_start_idx=getattr(args, "decoder_start_idx", 1),
-        decoder_end_idx=getattr(args, "decoder_end_idx", 2),
     )
