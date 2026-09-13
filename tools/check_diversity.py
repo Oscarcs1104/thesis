@@ -8,8 +8,7 @@ Pairwise Tanimoto diversity is not computed here (it's an O(n^2) estimate that g
 noisy once sampled down for large datasets) -- that metric lives in
 demo_generate_property.py, where it runs on the small set of generated candidates.
 
-Usage:
-  python tools/check_diversity.py --data-path data/zinc15_250K.csv
+See COMMANDS.md for usage.
 """
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from data_pipeline.data import load_graph_dataset
-from tools.mol_metrics import mols_from_smiles, murcko_scaffold_smiles, normalized_shannon_entropy
+from common.mol_metrics import mols_from_smiles, murcko_scaffold_smiles, normalized_shannon_entropy
 
 
 def parse_args() -> argparse.Namespace:

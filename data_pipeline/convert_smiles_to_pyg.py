@@ -19,9 +19,62 @@ except Exception as e:
 from torch_geometric.data import Data
 import numpy as np
 
+# --------------------------------------------------------------------------- #
+# D5: categorical atom/bond features (OGB-style), replacing the old 7-float
+# "dense" atom vector that treated atomic_num as a continuous scalar (so the
+# model implicitly learned "carbon is numerically close to nitrogen, far from
+# sulfur" -- a relationship with no chemical meaning). Every field below is an
+# index into its own nn.Embedding (see model/encoders.py NodeFeatureEncoder /
+# EdgeFeatureEncoder), so the model is free to place atom/bond types wherever
+# is useful in embedding space instead of inheriting an arbitrary ordering.
+#
+# Vocab sizes are intentionally generous (RDKit enums have more members than
+# ever appear in typical organic SMILES) so a rare value clamps instead of
+# crashing nn.Embedding with an out-of-range index.
+# --------------------------------------------------------------------------- #
+ATOM_VOCAB_SIZES = [119, 11, 7, 9, 8, 2, 2, 4]
+# [atomic_num, degree, formal_charge(+3 shift), total_num_Hs, hybridization, is_aromatic, is_in_ring, chiral_tag]
+BOND_VOCAB_SIZES = [22, 2, 2, 6]
+# [bond_type, is_conjugated, is_in_ring, stereo]
+
+
+def _clamp_idx(value: int, vocab_size: int) -> int:
+    return min(max(int(value), 0), vocab_size - 1)
+
+
+def atom_features_categorical(atom: Chem.Atom) -> np.ndarray:
+    return np.array(
+        [
+            _clamp_idx(atom.GetAtomicNum(), ATOM_VOCAB_SIZES[0]),
+            _clamp_idx(atom.GetDegree(), ATOM_VOCAB_SIZES[1]),
+            _clamp_idx(atom.GetFormalCharge() + 3, ATOM_VOCAB_SIZES[2]),
+            _clamp_idx(atom.GetTotalNumHs(), ATOM_VOCAB_SIZES[3]),
+            _clamp_idx(int(atom.GetHybridization()), ATOM_VOCAB_SIZES[4]),
+            int(atom.GetIsAromatic()),
+            int(atom.IsInRing()),
+            _clamp_idx(int(atom.GetChiralTag()), ATOM_VOCAB_SIZES[6]),
+        ],
+        dtype=np.int64,
+    )
+
+
+def bond_features_categorical(bond: Chem.Bond) -> np.ndarray:
+    return np.array(
+        [
+            _clamp_idx(int(bond.GetBondType()), BOND_VOCAB_SIZES[0]),
+            int(bond.GetIsConjugated()),
+            int(bond.IsInRing()),
+            _clamp_idx(int(bond.GetStereo()), BOND_VOCAB_SIZES[3]),
+        ],
+        dtype=np.int64,
+    )
+
 
 def atom_features(atom: Chem.Atom) -> np.ndarray:
-    # Basic atom-level features: atomic number, degree, formal charge, num implicit Hs, aromatic, chiral tag, hybridization
+    """Legacy dense (7-float) atom vector -- kept only for old checkpoints/callers
+    still using NodeFeatureEncoder(node_encoding="dense"). New graphs built by
+    smiles_to_data() use atom_features_categorical()/bond_features_categorical()
+    instead; see the module docstring above for why."""
     an = atom.GetAtomicNum()
     deg = atom.GetDegree()
     chg = atom.GetFormalCharge()
@@ -44,24 +97,31 @@ def smiles_to_data(smiles: str, target: Optional[float] = None) -> Optional[Data
     mol = Chem.MolFromSmiles(smiles)
     if mol is None or mol.GetNumAtoms() == 0:
         return None
-    # node features
-    feats = [atom_features(a) for a in mol.GetAtoms()]
-    x = torch.tensor(np.vstack(feats), dtype=torch.float)
+    # node features: categorical (D5) -- see atom_features_categorical() above
+    feats = [atom_features_categorical(a) for a in mol.GetAtoms()]
+    x = torch.tensor(np.vstack(feats), dtype=torch.long)
 
-    # edges
+    # edges + per-edge (bond) categorical features, duplicated for both directions
+    # so edge_attr[i] always describes the bond that edge_index[:, i] represents.
     edges = []
+    edge_feats = []
     for b in mol.GetBonds():
         i = b.GetBeginAtomIdx()
         j = b.GetEndAtomIdx()
+        bf = bond_features_categorical(b)
         edges.append([i, j])
+        edge_feats.append(bf)
         edges.append([j, i])
+        edge_feats.append(bf)
     if len(edges) > 0:
         edge_arr = np.array(edges, dtype=np.int64).T  # shape [2, E]
         edge_index = torch.tensor(edge_arr, dtype=torch.long)
+        edge_attr = torch.tensor(np.vstack(edge_feats), dtype=torch.long)
     else:
         edge_index = torch.empty((2, 0), dtype=torch.long)
+        edge_attr = torch.empty((0, len(BOND_VOCAB_SIZES)), dtype=torch.long)
 
-    data = Data(x=x, edge_index=edge_index)
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     if target is not None:
         try:
             data.y = torch.tensor([float(target)], dtype=torch.float)

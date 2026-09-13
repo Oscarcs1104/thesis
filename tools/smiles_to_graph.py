@@ -1,9 +1,7 @@
 """Convert a SMILES string into the PyG molecular graph the model actually consumes,
 and print its nodes (atoms) and edges (bonds) -- optionally saving a 2D depiction too.
 
-Usage:
-  python tools/smiles_to_graph.py --smiles "CCO"
-  python tools/smiles_to_graph.py --smiles "CCO" --save-image graph.png
+See COMMANDS.md for usage.
 """
 from __future__ import annotations
 

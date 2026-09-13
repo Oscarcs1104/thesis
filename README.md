@@ -11,15 +11,26 @@ This folder contains a standalone multimodal molecular model that:
 ## Folder layout
 
 ```
-model/            MultimodalModel, GraphEncoder/LanguageEncoder, SmilesDecoder (SELFIES)
-training/         train.py (predictor / joint / decoder modes), pretrain_graph.py, pretrain_selfies.py
-data_pipeline/    dataset loading, SMILES->PyG conversion, MoleculeNet download
-tools/            demo_generate_property.py, ploting.py, test_data_loader.py
-data/             raw + cached datasets (unchanged by scripts above)
-checkpoints/      saved training runs
+thesis_model/     this project's own model, same taxonomy as crossmodal_model/ below:
+  model/            MultimodalModel (main concat fusion), GraphEncoder/LanguageEncoder, SmilesDecoder (SELFIES),
+                     plus fusion-ablation models: cross_attention_model.py, moe_fusion_model.py, precomputed_molformer_model.py
+  train/            train.py (predictor / joint / decoder modes), pretrain_graph.py,
+                     plus fusion-ablation trainers: train_cross_attention.py, train_moe_fusion.py, train_precomputed_molformer.py
+  generation/       pretrain_selfies.py, demo_generate_property.py, inspect_latent_space.py
+  benchmark/        run_baselines.py, native_split.py
+crossmodal_model/ the adapted MoLA architecture (Graph+SMILES, A2 SMILES fix, conditional
+                   generation) -- same model/train/generation/benchmark layout; see its own README.md
+common/           shared utilities used by both models: repro.py (seeding/scheduler/metrics),
+                   wandb_utils.py, mol_metrics.py, selfies_vocab.py
+data_pipeline/    dataset loading, SMILES->PyG conversion, MoleculeNet/ZINC15 download, MoLFormer embedding precompute
+tools/            demo_predict_ablation.py, check_diversity.py, smiles_to_graph.py
+data/             raw + cached datasets, splits (official + re-derived), MolFormer embeddings -- shared by both models
+checkpoints/      saved training runs (crossmodal_model's under checkpoints/crossmodal/)
 ```
 
-All entrypoint scripts add the project root to `sys.path`, so they can be run directly, e.g. `python training/train.py ...` from the `test/` folder.
+See [COMMANDS.md](COMMANDS.md) for how to run every script above.
+
+All entrypoint scripts add the project root (`test/`) to `sys.path`, so they can be run directly, e.g. `python thesis_model/train/train.py ...` from the `test/` folder.
 
 ## Expected input
 
@@ -34,47 +45,9 @@ Each graph should provide:
 
 If `x` contains categorical node indices like MolPROP, keep `--node-encoding categorical` and use the correct `--node-vocab-sizes`.
 
-## Training example
+## Commands
 
-Property prediction only (graph encoder + HuggingFace text encoder -> concat -> MLP):
-
-```bash
-python training/train.py \
-  --data-path data/esol.csv,data/freesolv.csv,data/lipo.csv \
-  --task regression \
-  --graph-backbone gatv2 \
-  --language-backbone huggingface \
-  --language-model-name DeepChem/ChemBERTa-77M-MLM \
-  --use-language \
-  --hidden-dim 256 \
-  --num-layers 3 \
-  --batch-size 32 \
-  --epochs 100 \
-  --training-mode predictor
-```
-
-Joint training of the predictor and the SELFIES decoder together:
-
-```bash
-python training/train.py --data-path data/esol.csv --use-decoder --training-mode joint
-```
-
-Autoregressive decoder-only training on top of an existing predictor checkpoint (freezes everything except the decoder):
-
-```bash
-python training/train.py --data-path data/esol.csv --use-decoder --training-mode decoder \
-  --load-checkpoint checkpoints/best.pt
-```
-
-## Pretraining
-
-```bash
-python training/pretrain_graph.py --data-path data/esol.csv --out graph_pretrain.pt
-python training/pretrain_selfies.py --smiles-file data/some_smiles.txt --out selfies_pretrain.pt
-```
-
-`pretrain_graph.py` output can be fed back into `train.py` via `--graph-pretrained-checkpoint`.
-`pretrain_selfies.py` is exploratory/independent — it is not auto-loaded by `train.py`'s HuggingFace language branch.
+Every runnable script's usage (data prep, pretraining, training, fusion ablations, generation/evaluation tools) is catalogued in one place: see [COMMANDS.md](COMMANDS.md).
 
 ## Notes
 
@@ -82,4 +55,4 @@ python training/pretrain_selfies.py --smiles-file data/some_smiles.txt --out sel
 - Some `trust_remote_code=True` HF repos ship a broken tokenizer `auto_map` (seen with `DeepChem/MoLFormer-c3-1.1B`); `LanguageEncoder` automatically falls back to loading `tokenizer.json` directly in that case.
 - If your graph tensors are dense float features instead of categorical indices, switch to `--node-encoding dense`.
 - The default categorical node vocabulary sizes match the simplified MolPROP atom representation: atom type + chirality.
-- Checkpoints saved by `train.py` include `args` and `decoder_vocab`, so `tools/demo_generate_property.py` can reload a model without re-specifying every flag.
+- Checkpoints saved by `train.py` include `args` and `decoder_vocab`, so `thesis_model/generation/demo_generate_property.py` can reload a model without re-specifying every flag.
