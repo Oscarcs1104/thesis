@@ -6,9 +6,7 @@ downloads the '1M' bucket once and writes it out as two independent files:
   - data/zinc15_1M.csv    (all downloaded molecules)
   - data/zinc15_500K.csv  (a random subsample, same format as zinc15_250K.csv)
 
-Usage:
-  python data_pipeline/download_zinc15.py
-  python data_pipeline/download_zinc15.py --subsample-size 500000 --seed 2025
+See COMMANDS.md for usage.
 """
 from __future__ import annotations
 

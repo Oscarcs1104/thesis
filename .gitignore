@@ -14,3 +14,9 @@ slurm/
 
 results/*.log
 results/*.err
+
+# crossmodal_model generation outputs: inspection artifacts, not thesis results --
+# keep the small benchmark CSVs (results/mola/*_benchmark.csv), not these.
+results/mola/*.log
+results/mola/*_samples.csv
+results/mola/*_conditioning_semantic.csv

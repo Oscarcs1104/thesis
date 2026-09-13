@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from tools.mol_metrics import shannon_entropy
+from common.mol_metrics import shannon_entropy
 
 RDLogger.DisableLog("rdApp.*")
 

@@ -1,1 +1,1 @@
-from .model import MultimodalModel, build_model_from_args
+from .thesis_model import MultimodalModel, build_model_from_args

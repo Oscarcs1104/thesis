@@ -1,10 +1,7 @@
 """Canonicalize the SMILES column of a CSV into a new file, and report duplicates
 that canonicalization reveals (different raw SMILES for the same molecule).
 
-Never modifies the input file.
-
-Usage:
-  python data_pipeline/canonicalize_csv.py --csv data/esol.csv --out data/esol_canonical.csv
+Never modifies the input file. See COMMANDS.md for usage.
 """
 from __future__ import annotations
 

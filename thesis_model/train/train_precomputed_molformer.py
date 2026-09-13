@@ -1,0 +1,127 @@
+"""Ablation: train the property predictor with graph + a MoLA-style precomputed,
+frozen IBM MoLFormer embedding, instead of the main model's live language branch.
+Needs embeddings from data_pipeline/precompute_molformer_embeddings.py first.
+Predictor-only, no decoder.
+
+See COMMANDS.md for usage.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Dict
+
+import torch
+import torch.nn as nn
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+from data_pipeline.data import HybridGraphLangDataset, load_graph_dataset
+from data_pipeline.splitters import split_dataset as split_dataset_by_strategy
+from thesis_model.model.precomputed_molformer_model import build_precomputed_molformer_model_from_args
+from common.repro import seed_everything
+from thesis_model.train.train import _target_range, load_graph_pretrained_checkpoint, resolve_predefined_split, run_predictor_ablation_training
+from common.wandb_utils import add_wandb_args
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train the predictor with graph + precomputed frozen IBM MoLFormer embeddings (MoLA-style)")
+    parser.add_argument("--data-path", type=str, default=None, help="Single CSV/graph dataset, split internally via --split. Ignored if --dataset-dir or --train-path/--val-path/--test-path is given.")
+    parser.add_argument("--dataset-dir", type=str, default=None, help="Folder with csv/train.csv, csv/valid.csv, csv/test.csv -- uses that official split as-is (D1)")
+    parser.add_argument("--train-path", type=str, default=None)
+    parser.add_argument("--val-path", type=str, default=None)
+    parser.add_argument("--test-path", type=str, default=None)
+    parser.add_argument("--molformer-embeddings-path", type=str, required=True, help="Output of data_pipeline/precompute_molformer_embeddings.py -- must cover every split's SMILES")
+    parser.add_argument("--molformer-dim", type=int, default=768)
+    parser.add_argument("--output-dim", type=int, default=1)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--graph-backbone", type=str, default="gin", choices=["gcn", "gat", "gatv2", "gin"])
+    parser.add_argument("--node-encoding", type=str, default="categorical", choices=["categorical", "dense"])
+    parser.add_argument("--node-vocab-sizes", type=int, nargs="*", default=[119, 11, 7, 9, 8, 2, 2, 4])
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--train-ratio", type=float, default=0.8)
+    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--test-ratio", type=float, default=0.1)
+    parser.add_argument("--split", type=str, default="scaffold", choices=["scaffold", "random"], help="Used only when no predefined split is given")
+    parser.add_argument("--standardize-target", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--warmup-epochs", type=int, default=5)
+    parser.add_argument("--lr-schedule", type=str, default="plateau", choices=["plateau", "cosine"])
+    parser.add_argument("--plateau-factor", type=float, default=0.5)
+    parser.add_argument("--plateau-patience", type=int, default=5)
+    parser.add_argument("--min-lr-ratio", type=float, default=0.01)
+    parser.add_argument("--grad-clip", type=float, default=1.0)
+    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--seed", type=int, default=2025)
+    parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--checkpoint-path", type=str, default=None)
+    parser.add_argument("--graph-pretrained-checkpoint", type=str, default=None)
+    add_wandb_args(parser)
+    return parser.parse_args()
+
+
+def _attach_molformer_embeddings(graphs, embeddings: Dict[str, torch.Tensor]) -> None:
+    if not embeddings:
+        raise ValueError(
+            "--molformer-embeddings-path loaded an empty embeddings file -- re-run "
+            "data_pipeline/precompute_molformer_embeddings.py, or check the --out path"
+        )
+    emb_dim = next(iter(embeddings.values())).shape
+    missing = 0
+    for g in graphs:
+        smi = getattr(g, "smiles", None)
+        emb = embeddings.get(smi)
+        if emb is None:
+            missing += 1
+            emb = torch.zeros(emb_dim)
+        g.molformer_emb = emb.clone().view(1, -1)
+    if missing:
+        print(f"Warning: {missing} molecules had no precomputed MoLFormer embedding (filled with zeros) -- regenerate embeddings if this is unexpected")
+
+
+def main() -> None:
+    args = parse_args()
+    seed_everything(args.seed, deterministic=args.deterministic)
+
+    embeddings = torch.load(args.molformer_embeddings_path, map_location="cpu", weights_only=False)
+
+    predefined = resolve_predefined_split(args)
+    if predefined is not None:
+        train_path, val_path, test_path = predefined
+        train_graphs, val_graphs, test_graphs = (load_graph_dataset(p) for p in (train_path, val_path, test_path))
+        for graphs in (train_graphs, val_graphs, test_graphs):
+            _attach_molformer_embeddings(graphs, embeddings)
+        train_set, val_set, test_set = (HybridGraphLangDataset(g) for g in (train_graphs, val_graphs, test_graphs))
+        print(f"Loaded predefined split from {predefined}: train={len(train_set)} val={len(val_set)} test={len(test_set)}")
+    else:
+        if not args.data_path:
+            raise ValueError("Provide --dataset-dir (predefined split) or --data-path (internal split via --split).")
+        graphs = load_graph_dataset(args.data_path)
+        _attach_molformer_embeddings(graphs, embeddings)
+        dataset = HybridGraphLangDataset(graphs)
+        all_smiles = [str(getattr(dataset[i], "smiles", "")) for i in range(len(dataset))]
+        train_set, val_set, test_set = split_dataset_by_strategy(
+            dataset, args.split, args.train_ratio, args.val_ratio, args.test_ratio, args.seed, smiles_list=all_smiles
+        )
+    target_range = _target_range(train_set)
+
+    criterion = nn.MSELoss()
+
+    model = build_precomputed_molformer_model_from_args(args)
+    if args.graph_pretrained_checkpoint:
+        load_graph_pretrained_checkpoint(model, args.graph_pretrained_checkpoint)
+    model = model.to(args.device)
+    run_predictor_ablation_training(model, args, train_set, val_set, test_set, target_range, criterion)
+
+
+if __name__ == "__main__":
+    main()

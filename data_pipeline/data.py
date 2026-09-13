@@ -251,7 +251,11 @@ def load_graph_dataset(path: str) -> list[Data]:
 
     graph_path = Path(raw_path)
     if graph_path.is_file() and graph_path.suffix.lower() in {".csv", ".gz"}:
-        cache_path = graph_path.with_suffix(".graphs.pt") if graph_path.suffix.lower() == ".csv" else graph_path.with_name(f"{graph_path.stem}.graphs.pt")
+        # "v2" (D5): smiles_to_data() now emits categorical atom/bond features
+        # (int x + edge_attr) instead of the old dense 7-float x with no edge_attr.
+        # Bumping the cache suffix forces every dataset to reconvert instead of
+        # silently loading an old-format .graphs.pt that's now shape-incompatible.
+        cache_path = graph_path.with_suffix(".graphsv2.pt") if graph_path.suffix.lower() == ".csv" else graph_path.with_name(f"{graph_path.stem}.graphsv2.pt")
         if cache_path.exists():
             return _torch_load(cache_path)
         graphs = _csv_path_to_graphs(graph_path)
