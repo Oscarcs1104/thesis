@@ -20,6 +20,7 @@ slurm/          # SLURM output dir; the job SCRIPTS live in scripts/slurm/
 
 results/*.log
 results/*.err
+results/logs/       # SLURM stdout/stderr (the dir must exist before sbatch)
 
 # crossmodal_model generation outputs: inspection artifacts, not thesis results --
 # keep the small benchmark CSVs (results/mola/*_benchmark.csv), not these.

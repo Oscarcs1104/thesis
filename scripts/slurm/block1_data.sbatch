@@ -10,6 +10,10 @@
 # small sample nearly every molecule is alone in its scaffold and has nothing to
 # pair with. A LIMIT=5000 run still exercises 1a and 1b end to end.
 #
+# FIRST TIME ONLY: `mkdir -p results/logs` before submitting. SLURM opens the
+# --output/--error files before the script runs, so the mkdir below is too late
+# and the job dies at launch with no usable message.
+#
 # Override resources at submit time rather than editing this file:
 #
 #   sbatch --cpus-per-task=16 --mem=24G scripts/slurm/block1_data.sbatch
