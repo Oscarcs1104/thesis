@@ -42,25 +42,55 @@ def build_memory(
     hidden_dim: int,
     property_values: Optional[torch.Tensor] = None,
     property_proj: Optional[nn.Module] = None,
+    condition: Optional[torch.Tensor] = None,
 ):
-    """Turn Encoder.forward_with_raw's output into one combined [B, N+L(+1), H] memory
-    sequence + a matching [B, N+L(+1)] bool padding mask (True = ignore), the same
-    convention nn.TransformerDecoder's memory_key_padding_mask expects."""
+    """Turn Encoder.forward_with_raw's output into one combined [B, S, H] memory sequence
+    + a matching [B, S] bool padding mask (True = ignore), the convention
+    nn.TransformerDecoder's memory_key_padding_mask expects.
+
+    Either stream may be absent (raw[...] is None) -- that is the single-modality
+    ablation, see HybridEncoder.forward_with_raw. Whatever is present gets concatenated.
+
+    Two conditioning paths, deliberately kept separate:
+      property_values + property_proj : one projected scalar, the original Chemformer-style
+          token. Retained so ablate_prop_token.py can still diagnose the old models.
+      condition : [B, P, H] precomputed condition tokens (see pair_decoder.py's
+          ConditionEmbedding), prepended in order. This is the path the pair-conditioned
+          generator uses.
+    """
     node_state, node_batch, sm_state, sm_pad_mask = (
         raw["node_state"], raw["node_batch"], raw["sm_state"], raw["sm_pad_mask"]
     )
-    node_dense, node_real_mask = to_dense_batch(node_state, node_batch)  # [B,N,H], [B,N] True=real
-    memory = torch.cat([node_dense, sm_state], dim=1)                    # [B, N+L, H]
-    memory_pad_mask = torch.cat([~node_real_mask, sm_pad_mask], dim=1)   # [B, N+L] True=pad
+
+    parts, pads = [], []
+    if node_state is not None:
+        node_dense, node_real_mask = to_dense_batch(node_state, node_batch)  # [B,N,H], [B,N] True=real
+        parts.append(node_dense)
+        pads.append(~node_real_mask)
+    if sm_state is not None:
+        parts.append(sm_state)
+        pads.append(sm_pad_mask)
+    if not parts:
+        raise ValueError("build_memory got neither graph nor SMILES states -- the encoder "
+                         "produced nothing to condition on")
+
+    memory = torch.cat(parts, dim=1) if len(parts) > 1 else parts[0]
+    memory_pad_mask = torch.cat(pads, dim=1) if len(pads) > 1 else pads[0]
+
+    if property_values is not None and condition is not None:
+        raise ValueError("pass either property_values or condition, not both")
 
     if property_values is not None:
         if property_proj is None:
             raise ValueError("property_values given but no property_proj module")
         prop = property_values.to(memory.dtype).view(-1, 1)              # [B,1]
-        prop_token = property_proj(prop).unsqueeze(1)                    # [B,1,H]
-        memory = torch.cat([prop_token, memory], dim=1)
-        prop_pad = torch.zeros(memory.size(0), 1, dtype=torch.bool, device=memory.device)
-        memory_pad_mask = torch.cat([prop_pad, memory_pad_mask], dim=1)
+        condition = property_proj(prop).unsqueeze(1)                     # [B,1,H]
+
+    if condition is not None:
+        condition = condition.to(memory.dtype)
+        memory = torch.cat([condition, memory], dim=1)
+        cond_pad = torch.zeros(memory.size(0), condition.size(1), dtype=torch.bool, device=memory.device)
+        memory_pad_mask = torch.cat([cond_pad, memory_pad_mask], dim=1)
 
     return memory, memory_pad_mask
 

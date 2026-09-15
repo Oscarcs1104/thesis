@@ -82,12 +82,17 @@ class HybridEncoder(nn.Module):
 
     def forward_with_raw(self, x, edge_index, edge_attr, sm, batch):
         """Generation entry point -- see crossmodal_model/model/encoder.py's Encoder for
-        the non-hybrid equivalent. Requires positional_smiles=True and both modalities
-        enabled (generation conditions on both streams by construction)."""
-        if not self.positional_smiles:
-            raise ValueError("forward_with_raw needs positional_smiles=True")
-        if not (self.use_graph and self.use_smiles):
-            raise ValueError("forward_with_raw needs both use_graph=True and use_smiles=True (generation conditions on both streams)")
+        the non-hybrid equivalent.
+
+        Single-modality is allowed here on purpose: comparing generation quality with the
+        graph branch off against the SMILES branch off IS the thesis's ablation, and
+        refusing to build that memory made the experiment impossible to run. The absent
+        stream comes back as None in `raw`, and build_memory concatenates whatever is
+        present. positional_smiles is still required whenever the SMILES branch is on --
+        a permutation-invariant, pad-diluted character encoder cannot support generation.
+        """
+        if self.use_smiles and not self.positional_smiles:
+            raise ValueError("forward_with_raw needs positional_smiles=True when use_smiles=True")
         fused_all, raw = self._forward_impl(x, edge_index, edge_attr, sm, batch, need_raw=True)
         return fused_all, raw
 
