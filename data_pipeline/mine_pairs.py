@@ -305,27 +305,43 @@ def main() -> None:
         "settings": vars(args),
         "delta_stats": {},
     }
-    print(f"\n{'delta':<8} {'mean':>9} {'std':>9} {'p1':>9} {'p50':>9} {'p99':>9} {'|d|>1':>8}")
-    print("-" * 66)
+    # Spread is reported in units of the delta's own std. An absolute threshold is
+    # meaningless across properties: "changed by more than 1" is trivially true for MW
+    # in daltons and TPSA in angstrom^2, and demanding for logP and QED.
+    print(f"\n{'delta':<8} {'std':>9} {'p1':>9} {'p99':>9} {'|d|>1sd':>9}  eval range (p5..p95)")
+    print("-" * 74)
     for i, name in enumerate(PROPERTIES):
         d = deltas[:, i]
-        frac_big = float((np.abs(d) > 1.0).mean())
+        sd = float(d.std())
+        frac_big = float((np.abs(d) > sd).mean()) if sd > 0 else 0.0
+        # What Block 3 is allowed to ask for. Requesting beyond this is extrapolation --
+        # exactly the failure the old evaluation made by asking for true_y +/- 1 sigma.
+        eval_points = [float(np.percentile(d, q)) for q in (5, 25, 50, 75, 95)]
         meta["delta_stats"][name] = {
-            "mean": float(d.mean()), "std": float(d.std()),
+            "mean": float(d.mean()), "std": sd,
             "p1": float(np.percentile(d, 1)), "p50": float(np.percentile(d, 50)),
-            "p99": float(np.percentile(d, 99)), "frac_abs_gt_1": frac_big,
+            "p99": float(np.percentile(d, 99)),
+            "frac_abs_gt_1_std": frac_big,
+            "eval_deltas_p5_p95": eval_points,
             "histogram": np.histogram(d, bins=40)[0].tolist(),
             "histogram_edges": [float(e) for e in np.histogram(d, bins=40)[1]],
         }
-        print(f"{name:<8} {d.mean():>9.3f} {d.std():>9.3f} {np.percentile(d, 1):>9.3f} "
-              f"{np.percentile(d, 50):>9.3f} {np.percentile(d, 99):>9.3f} {frac_big:>8.1%}")
+        pts = ", ".join(f"{p:+.2f}" for p in eval_points)
+        print(f"{name:<8} {sd:>9.3f} {np.percentile(d, 1):>9.3f} {np.percentile(d, 99):>9.3f} "
+              f"{frac_big:>9.1%}  [{pts}]")
 
     (corpus_dir / "pairs_meta.json").write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
+    per_source = 2.0 * len(pairs) / max(int(valid.sum()), 1)
     print(f"\nWrote {pairs_path} {pairs.shape} and pair_deltas.npy {deltas.shape}")
-    print("\nRead the |d|>1 column for logp before training. If it is near zero, every pair is")
-    print("a near-copy and the conditioning has nothing to learn: lower --tanimoto-max, or")
-    print("re-run with --balance-delta logp (tune --balance-cap-quantile off the histogram in")
-    print("pairs_meta.json -- it discards pairs, so check how many survive).")
+    print(f"Pairs per molecule as source: {per_source / 2:.1f} (cap is --max-pairs-per-mol "
+          f"= {args.max_pairs_per_mol})")
+    if per_source / 2 < args.max_pairs_per_mol * 0.8:
+        print("  The cap is not binding, so 'prefer the least similar analog' never got to")
+        print("  choose -- every admissible hit was taken. On a denser corpus the cap starts")
+        print("  selecting, and the delta spread should widen.")
+    print("\nThe eval range column is what Block 3 may ask for. Asking beyond it is")
+    print("extrapolation. If the spread is too narrow to be interesting, the levers are")
+    print("--tanimoto-max (lower it) and --balance-delta (check how many pairs survive).")
 
 
 if __name__ == "__main__":
