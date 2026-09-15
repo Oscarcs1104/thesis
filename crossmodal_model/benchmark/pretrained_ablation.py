@@ -12,10 +12,13 @@ Graphs use the Hu et al. schema (data_pipeline/features_pretrain_gnn.py), becaus
 is what the GIN checkpoints were trained on -- not the OGB 9+3 schema the rest of the
 repo uses.
 
-The language backbones are frozen by default and the GIN is fine-tuned by default: a
-77M-parameter transformer fine-tuned on 642 FreeSolv molecules overfits before it
-learns anything, while a 1.9M-parameter GIN does not. Both are flags; whatever is
-chosen must be the same across every row or the comparison is not about the backbones.
+Both backbones are FROZEN by default. Only the per-branch projection, the MoLA
+cross-attention, the layer weights and the head are trained. That makes the table a
+comparison of the pretrained REPRESENTATIONS rather than of how well each architecture
+fine-tunes on a few hundred molecules -- and on FreeSolv-sized data, fine-tuning a 77M
+transformer mostly measures how fast it overfits. --no-freeze-lm / --no-freeze-gin
+switch it, but whatever is chosen has to hold across every row or the comparison stops
+being about the backbones.
 
     python crossmodal_model/benchmark/pretrained_ablation.py
     python crossmodal_model/benchmark/pretrained_ablation.py --datasets esol --configs gin chemberta+gin
@@ -79,7 +82,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gin-variant", type=str, default="contextpred")
     p.add_argument("--freeze-lm", dest="freeze_lm", action="store_true", default=True)
     p.add_argument("--no-freeze-lm", dest="freeze_lm", action="store_false")
-    p.add_argument("--freeze-gin", action="store_true", default=False)
+    p.add_argument("--freeze-gin", dest="freeze_gin", action="store_true", default=True)
+    p.add_argument("--no-freeze-gin", dest="freeze_gin", action="store_false")
     p.add_argument("--out", type=str, default=str(ROOT / "results" / "pretrained_ablation.csv"))
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()
