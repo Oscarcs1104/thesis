@@ -4,13 +4,20 @@
 #   SMOKE=1 sbatch scripts/slurm/block1_data.sbatch    # 50k molecules, ~5 min
 #   FORCE=1 sbatch scripts/slurm/block1_data.sbatch    # the full 1.9M
 #
-# Check --partition against `sinfo` before the first submit.
+# Check --partition against `sinfo -o "%P %c %m"` before the first submit, and
+# override resources there rather than editing this file:
+#
+#   sbatch --cpus-per-task=16 --mem=24G scripts/slurm/block1_data.sbatch
+#
+# CPUs only change how long it takes. Memory is the one that decides whether it
+# runs at all: ~2G for the smoke, ~10-14G for the full 1.9M (the peak is holding
+# every canonical SMILES + SELFIES string in memory at once, before encoding).
 
 #SBATCH --job-name=thesis-block1
 #SBATCH --partition=cpu
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
-#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
+#SBATCH --time=06:00:00
 #SBATCH --output=results/logs/block1_%j.out
 #SBATCH --error=results/logs/block1_%j.err
 
