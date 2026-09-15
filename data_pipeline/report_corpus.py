@@ -26,6 +26,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _framework_only(scaffold: str) -> str:
+    """Murcko scaffold SMILES -> generic framework SMILES (atom types and bond orders
+    erased, topology kept). Empty string for acyclic molecules, which have no scaffold."""
+    if not scaffold:
+        return ""
+    from rdkit import Chem, RDLogger
+
+    RDLogger.DisableLog("rdApp.*")
+    from rdkit.Chem.Scaffolds import MurckoScaffold
+
+    m = Chem.MolFromSmiles(scaffold)
+    if m is None:
+        return ""
+    try:
+        return Chem.MolToSmiles(MurckoScaffold.MakeScaffoldGeneric(m))
+    except Exception:
+        return ""
+
+
 def _coverage(args):
     """(heavy atoms in scaffold, heavy atoms in molecule, generic framework SMILES).
 
@@ -61,6 +80,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--corpus-dir", default="data/moses")
     ap.add_argument("--sample", type=int, default=20000, help="molecules sampled for the scaffold stats")
+    ap.add_argument("--frameworks", action="store_true",
+                    help="compute the generic framework for EVERY molecule and cache it. "
+                         "Required for real bucket statistics -- a sample cannot give them")
     ap.add_argument("--workers", type=int, default=max(1, (mp.cpu_count() or 2) - 1))
     args = ap.parse_args()
 
@@ -143,21 +165,41 @@ def main() -> None:
           f"(p25 {np.percentile(frac, 25):.0%}, p75 {np.percentile(frac, 75):.0%})")
     print(f"  atoms left to generate: {(mol - scaf).mean():.1f} on average")
 
-    # How much the two candidate constraints actually pin down, measured the same way:
-    # how many molecules in the sample share one. A constraint that many molecules share
-    # is a constraint that leaves the property token something to decide.
-    generic = [r[2] for r in res if r[2]]
-    n_sample = len(res)
-    scaf_counts = Counter(s for s, _ in items if s)
-    gen_counts = Counter(generic)
-    print("\n  constraint strength (molecules sharing the same constraint, in this sample):")
-    print(f"    {'constraint':<22} {'distinct':>10} {'mean/bucket':>12} {'median':>8}")
-    for label, c in (("Murcko scaffold", scaf_counts), ("generic framework", gen_counts)):
-        v = np.array(sorted(c.values(), reverse=True)) if c else np.array([0])
-        print(f"    {label:<22} {len(c):>10,} {v.mean():>12.1f} {np.median(v):>8.0f}")
-    ratio = (len(scaf_counts) / max(len(gen_counts), 1)) if gen_counts else float("nan")
-    print(f"    -> erasing atom types and bond orders collapses {ratio:.1f} Murcko scaffolds "
-          f"into one framework")
+    # Bucket occupancy MUST be measured on the whole corpus. Counting it inside a random
+    # 20k sample of 1.9M is meaningless: a scaffold with 10 corpus molecules shows up
+    # twice in such a sample with probability ~0.1%, so almost everything looks unique.
+    # Only the ratio of distinct counts survives sampling, so that is all the sample is
+    # used for here; the occupancy numbers come from --frameworks over every molecule.
+    gen_sample = Counter(r[2] for r in res if r[2])
+    scaf_sample = Counter(s for s, _ in items if s)
+    ratio = len(scaf_sample) / max(len(gen_sample), 1)
+    print(f"\n  erasing atom types and bond orders collapses {ratio:.1f} Murcko scaffolds into "
+          f"one generic framework")
+
+    fw_path = d / "frameworks.csv"
+    if args.frameworks:
+        print(f"  computing generic frameworks for all {len(corpus):,} molecules...")
+        with mp.Pool(args.workers) as pool:
+            fws = pool.map(_framework_only, corpus["scaffold"].fillna("").astype(str).tolist(),
+                           chunksize=2000)
+        pd.DataFrame({"framework": fws}).to_csv(fw_path, index=False)
+        print(f"  cached to {fw_path}")
+
+    if fw_path.exists():
+        fws = pd.read_csv(fw_path)["framework"].fillna("").astype(str)
+        fw_counts = Counter(f for f in fws if f)
+        fw_sizes = np.array(sorted(fw_counts.values(), reverse=True))
+        print("\n  constraint strength over the FULL corpus "
+              "(molecules sharing one constraint = entropy the property must resolve):")
+        print(f"    {'constraint':<22} {'distinct':>10} {'mean':>8} {'median':>8} {'>=10':>16}")
+        for label, c_sizes, total in (("Murcko scaffold", sizes, len(scaffolds)),
+                                      ("generic framework", fw_sizes, len(fws))):
+            big = int(c_sizes[c_sizes >= 10].sum())
+            print(f"    {label:<22} {len(c_sizes):>10,} {c_sizes.mean():>8.1f} "
+                  f"{np.median(c_sizes):>8.0f} {big / total:>15.1%}")
+    else:
+        print(f"\n  (pass --frameworks to measure framework buckets over the whole corpus;"
+              f" the sample above cannot)")
     print()
     if frac.mean() > 0.7:
         print(f"  The Murcko scaffold already fixes {frac.mean():.0%} of the molecule and leaves only")
