@@ -10,8 +10,7 @@
 # small sample nearly every molecule is alone in its scaffold and has nothing to
 # pair with. A LIMIT=5000 run still exercises 1a and 1b end to end.
 #
-# Check --partition against `sinfo -o "%P %c %m"` before the first submit, and
-# override resources there rather than editing this file:
+# Override resources at submit time rather than editing this file:
 #
 #   sbatch --cpus-per-task=16 --mem=24G scripts/slurm/block1_data.sbatch
 #
@@ -20,7 +19,8 @@
 # every canonical SMILES + SELFIES string in memory at once, before encoding).
 
 #SBATCH --job-name=thesis-block1
-#SBATCH --partition=cpu
+#SBATCH --account=mol_thesis
+#SBATCH --partition=cpu-cvail01
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=06:00:00
