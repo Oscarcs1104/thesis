@@ -80,11 +80,14 @@ def _csv_path_to_graphs(csv_path: Path) -> list[Data]:
         if smiles_col is None:
             smiles_col = reader.fieldnames[0]
 
-        target_col = None
-        for name in reader.fieldnames:
-            if name and name.lower() != smiles_col.lower():
-                target_col = name
-                break
+        non_smiles = [name for name in reader.fieldnames if name and name.lower() != smiles_col.lower()]
+        target_col = non_smiles[0] if non_smiles else None
+        if len(non_smiles) > 1:
+            print(
+                f"[data] {csv_path.name}: {len(non_smiles)} non-SMILES columns {non_smiles}; "
+                f"using '{target_col}' as the regression target. Pass an explicit single-target "
+                f"CSV if that's wrong."
+            )
 
         data_list: list[Data] = []
         for row in reader:
@@ -251,11 +254,15 @@ def load_graph_dataset(path: str) -> list[Data]:
 
     graph_path = Path(raw_path)
     if graph_path.is_file() and graph_path.suffix.lower() in {".csv", ".gz"}:
-        # "v2" (D5): smiles_to_data() now emits categorical atom/bond features
-        # (int x + edge_attr) instead of the old dense 7-float x with no edge_attr.
-        # Bumping the cache suffix forces every dataset to reconvert instead of
-        # silently loading an old-format .graphs.pt that's now shape-incompatible.
-        cache_path = graph_path.with_suffix(".graphsv2.pt") if graph_path.suffix.lower() == ".csv" else graph_path.with_name(f"{graph_path.stem}.graphsv2.pt")
+        # Cache key carries the feature-schema version so a schema change (e.g. the
+        # move to OGB-style integer features) invalidates every stale *.graphs cache
+        # instead of silently reusing it with the wrong encoding.
+        try:
+            from data_pipeline.features import FEATURE_VERSION
+        except Exception:
+            FEATURE_VERSION = "v0"
+        stem = graph_path.name[: -len(graph_path.suffix)]
+        cache_path = graph_path.with_name(f"{stem}.graphs.{FEATURE_VERSION}.pt")
         if cache_path.exists():
             return _torch_load(cache_path)
         graphs = _csv_path_to_graphs(graph_path)
@@ -460,3 +467,57 @@ def _ensure_edge_index_and_types(graph: Data) -> Data:
     # final fallback
     graph.edge_index = _torch.empty((2, 0), dtype=_torch.long)
     return graph
+
+
+# --------------------------------------------------------------------------- #
+# Ground-truth lookup
+# --------------------------------------------------------------------------- #
+# Moved here from thesis_model/generation/demo_generate_property.py, which became a
+# thin CLI over tools/eval_generation.py during the eval-redesign merge. Reading the
+# shipped dataset CSVs belongs in data_pipeline, and tools/demo_predict_ablation.py
+# is the caller.
+_LABELLED_DATASETS = {
+    "esol": ("data/esol.csv", "logSolubility"),
+    "freesolv": ("data/freesolv.csv", "freesolv"),
+    "lipo": ("data/lipo.csv", "lipo"),
+}
+
+
+def lookup_real_property(smiles: str, root: Optional[Path] = None) -> list:
+    """Search esol/freesolv/lipo for this exact molecule; return its real label(s).
+
+    Returns a list of ``(dataset_name, column, value)``. Matches on the raw string
+    first, then on canonical SMILES, so a differently-written form of the same
+    molecule still hits. Empty list if the molecule isn't in any of the three.
+    """
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+
+    def _canonical(smi: str) -> Optional[str]:
+        try:
+            from rdkit import Chem
+        except Exception:
+            return None
+        mol = Chem.MolFromSmiles(smi)
+        return Chem.MolToSmiles(mol) if mol is not None else None
+
+    canonical_input = _canonical(smiles)
+    matches = []
+    for dataset_name, (rel_path, column) in _LABELLED_DATASETS.items():
+        csv_path = root / rel_path
+        if not csv_path.exists():
+            continue
+        with csv_path.open("r", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                row_smiles = row.get("smiles")
+                if row_smiles is None:
+                    continue
+                if row_smiles != smiles and not (
+                    canonical_input is not None and _canonical(row_smiles) == canonical_input
+                ):
+                    continue
+                try:
+                    matches.append((dataset_name, column, float(row[column])))
+                except (TypeError, ValueError):
+                    pass
+                break
+    return matches

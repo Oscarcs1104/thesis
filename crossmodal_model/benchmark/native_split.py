@@ -16,7 +16,7 @@ and dc.trans.undo_transforms(y, transformers) does NOT reliably recover the true
 units here -- verified directly (freesolv train y came back mean=0.141/std=0.853
 instead of the real ~[-25, 3] kcal/mol range, both with reload=True *and* with a fully
 wiped cache + reload=False, so it isn't just a stale-cache issue like the one
-data_pipeline/download_deepchem_datasets.py's comments describe). So this script does
+data_pipeline/download_molnet.py's comments describe). So this script does
 NOT call dc.molnet.load_*/undo_transforms at all: it reads the already-validated raw
 SMILES+target pool from test/data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
 (known-good raw units, cross-checked multiple times this session), featurizes it once,
@@ -112,7 +112,7 @@ def dump_split_csv(ds, out_path: Path, target_col: str) -> None:
 
 
 def _suspicious_stats(y) -> bool:
-    """Same tripwire as data_pipeline/download_deepchem_datasets.py: a z-scored
+    """Same tripwire as data_pipeline/download_molnet.py: a z-scored
     NormalizationTransformer output that failed to undo looks like mean~0, std~1 --
     every real ESOL/FreeSolv/Lipophilicity target we ship has |mean| or std well outside
     this band."""
@@ -204,8 +204,8 @@ def run_one(dataset_name: str, seed: int, args) -> Dict[str, float]:
 
     train_y = torch.stack([d.y.float().view(-1) for d in train_data])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
-    target_range = (float(train_y.min()), float(train_y.max()))
-    print(f"  [seed {seed}] train target stats: n={train_y.numel()} mean={train_y.mean():.3f} std={train_y.std():.3f} range={target_range}")
+    target_std = float(train_y.std())
+    print(f"  [seed {seed}] train target stats: n={train_y.numel()} mean={train_y.mean():.3f} std={train_y.std():.3f} nrmse_denom={target_std:.4f}")
 
     model = MoLA(
         graph_dim=train_data[0].x.size(1),
@@ -232,7 +232,7 @@ def run_one(dataset_name: str, seed: int, args) -> Dict[str, float]:
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, standardizer, args.grad_clip)
-        val_metrics = evaluate(model, valid_loader, criterion, device, standardizer, target_range)
+        val_metrics = evaluate(model, valid_loader, criterion, device, standardizer, target_std)
         step_scheduler(scheduler, val_metrics["loss"])
         print(f"  Epoch {epoch:03d} | lr={optimizer.param_groups[0]['lr']:.2e} | train_loss={train_loss:.4f} | val_loss={val_metrics['loss']:.4f} | val_rmse={val_metrics.get('rmse', float('nan')):.4f}")
         wandb_log(wandb_run, {"train/loss": train_loss, **{f"val/{k}": v for k, v in val_metrics.items()}, "lr": optimizer.param_groups[0]["lr"]}, step=epoch)
@@ -248,7 +248,7 @@ def run_one(dataset_name: str, seed: int, args) -> Dict[str, float]:
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    test_metrics = evaluate(model, test_loader, criterion, device, standardizer, target_range)
+    test_metrics = evaluate(model, test_loader, criterion, device, standardizer, target_std)
     print(
         f"  [seed {seed}] Test loss={test_metrics['loss']:.4f} | RMSE={test_metrics.get('rmse', float('nan')):.4f} "
         f"| NRMSE={test_metrics.get('nrmse', float('nan')):.4f} | MAE={test_metrics.get('mae', float('nan')):.4f} "

@@ -131,7 +131,7 @@ def main() -> None:
 
     train_y = torch.stack([d.y.float().view(-1) for d in train_data])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
-    target_range = (float(train_y.min()), float(train_y.max()))
+    target_std = float(train_y.std())
 
     mola = HybridMoLA(
         sm_vocab_size=len(char_vocab), hidden_dim=args.hidden_dim, output_dim=1,
@@ -205,7 +205,7 @@ def main() -> None:
             total_gen_loss += gen_loss.item() * batch.num_graphs
             total_items += batch.num_graphs
 
-        reg_metrics = regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_range)
+        reg_metrics = regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_std)
         return {
             "reg_loss": total_reg_loss / max(total_items, 1),
             "gen_loss": total_gen_loss / max(total_items, 1),

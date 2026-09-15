@@ -100,7 +100,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, standardizer, g
     return total_loss / max(total_items, 1)
 
 
-def evaluate(model, loader, criterion, device, standardizer, target_range) -> Dict[str, float]:
+def evaluate(model, loader, criterion, device, standardizer, target_std) -> Dict[str, float]:
     from common.repro import regression_metrics
 
     model.eval()
@@ -119,5 +119,5 @@ def evaluate(model, loader, criterion, device, standardizer, target_range) -> Di
             total_loss += loss.item() * batch.num_graphs
             total_items += batch.num_graphs
     metrics = {"loss": total_loss / max(total_items, 1)}
-    metrics.update(regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_range))
+    metrics.update(regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_std))
     return metrics

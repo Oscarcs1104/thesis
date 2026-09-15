@@ -141,7 +141,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, standardizer, g
     return total_loss / max(total_items, 1)
 
 
-def evaluate(model, loader, criterion, device, standardizer, target_range) -> Dict[str, float]:
+def evaluate(model, loader, criterion, device, standardizer, target_std) -> Dict[str, float]:
     model.eval()
     total_loss, total_items = 0.0, 0
     all_preds, all_targets = [], []
@@ -158,7 +158,7 @@ def evaluate(model, loader, criterion, device, standardizer, target_range) -> Di
             total_loss += loss.item() * batch.num_graphs
             total_items += batch.num_graphs
     metrics = {"loss": total_loss / max(total_items, 1)}
-    metrics.update(regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_range))
+    metrics.update(regression_metrics(torch.cat(all_preds), torch.cat(all_targets), target_std))
     return metrics
 
 
@@ -168,8 +168,8 @@ def run_one_seed(dataset_name, train_data, valid_data, test_data, vocab, seed: i
 
     train_y = torch.stack([d.y.float().view(-1) for d in train_data])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
-    target_range = (float(train_y.min()), float(train_y.max()))
-    print(f"  [seed {seed}] train target stats: n={train_y.numel()} mean={train_y.mean():.3f} std={train_y.std():.3f} range={target_range}")
+    target_std = float(train_y.std())
+    print(f"  [seed {seed}] train target stats: n={train_y.numel()} mean={train_y.mean():.3f} std={train_y.std():.3f} nrmse_denom={target_std:.4f}")
 
     model = HybridMoLA(
         sm_vocab_size=len(vocab),
@@ -203,7 +203,7 @@ def run_one_seed(dataset_name, train_data, valid_data, test_data, vocab, seed: i
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, standardizer, args.grad_clip)
-        val_metrics = evaluate(model, valid_loader, criterion, device, standardizer, target_range)
+        val_metrics = evaluate(model, valid_loader, criterion, device, standardizer, target_std)
         step_scheduler(scheduler, val_metrics["loss"])
         lr_now = optimizer.param_groups[0]["lr"]
         print(f"  Epoch {epoch:03d} | lr={lr_now:.2e} | train_loss={train_loss:.4f} | val_loss={val_metrics['loss']:.4f} | val_rmse={val_metrics.get('rmse', float('nan')):.4f}")
@@ -223,7 +223,7 @@ def run_one_seed(dataset_name, train_data, valid_data, test_data, vocab, seed: i
     if best_state is not None:
         model.load_state_dict(best_state)
 
-    test_metrics = evaluate(model, test_loader, criterion, device, standardizer, target_range)
+    test_metrics = evaluate(model, test_loader, criterion, device, standardizer, target_std)
     print(
         f"  [seed {seed}] Test loss={test_metrics['loss']:.4f} | RMSE={test_metrics.get('rmse', float('nan')):.4f} "
         f"| NRMSE={test_metrics.get('nrmse', float('nan')):.4f} | MAE={test_metrics.get('mae', float('nan')):.4f} "

@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data
-from thesis_model.generation.demo_generate_property import _lookup_real_property
+from data_pipeline.data import lookup_real_property
 
 
 def build_ablation_model(checkpoint_path: str, device: str):
@@ -83,7 +83,7 @@ def main() -> None:
     print(f"Input SMILES: {args.smiles}")
     print(f"Predicted property: {pred:.4f}")
 
-    real_matches = _lookup_real_property(args.smiles)
+    real_matches = lookup_real_property(args.smiles)
     if real_matches:
         for dataset_name, column, value in real_matches:
             print(f"Real value ({dataset_name}, column '{column}'): {value:.4f}")

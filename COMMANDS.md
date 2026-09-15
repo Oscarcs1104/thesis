@@ -12,8 +12,8 @@ python data_pipeline/canonicalize_csv.py --csv data/esol.csv --out data/esol_can
 
 ### Descargar datasets de MoleculeNet (esol, freesolv, lipo, tox21, etc.)
 ```
-python data_pipeline/download_deepchem_datasets.py --datasets esol freesolv lipo
-python data_pipeline/download_deepchem_datasets.py --datasets all
+python data_pipeline/download_molnet.py --datasets esol freesolv lipo
+python data_pipeline/prepare_all.py   # download + scaffold split + graph caches, all three
 ```
 
 ### Descargar ZINC15 (bucket 1M de DeepChem + submuestra de 500K)
@@ -96,7 +96,6 @@ python thesis_model/train/train_moe_fusion.py --data-path data/esol.csv --epochs
 MoLFormer precomputado y congelado (estilo MoLA -- requiere el paso de precómputo de la sección 1):
 ```
 python data_pipeline/precompute_molformer_embeddings.py --data-path data/esol.csv --out data/esol.molformer_emb.pt
-python thesis_model/train/train_precomputed_molformer.py --data-path data/esol.csv --molformer-embeddings-path data/esol.molformer_emb.pt --epochs 50 --device cuda
 ```
 
 ## 4. Generación y evaluación
@@ -126,8 +125,6 @@ python tools/smiles_to_graph.py --smiles "CCO" --save-image plots/graph.png
 
 ### Inspeccionar el espacio latente (fused_feat vs. decoder_latent)
 ```
-python thesis_model/generation/inspect_latent_space.py --checkpoint-path checkpoints/decoder_esol.pt --smiles "CCO"
-python thesis_model/generation/inspect_latent_space.py --checkpoint-path checkpoints/decoder_esol.pt --data-path data/esol.csv --max-molecules 300
 ```
 El primero imprime estadísticas del vector usado para predecir (`fused_feat`) y del token de condición que entra al decoder (`decoder_latent`). El segundo embebe una muestra del dataset y guarda dos scatter plots PCA en `plots/` coloreados por la propiedad real, para ver si cada espacio se organiza según la propiedad.
 

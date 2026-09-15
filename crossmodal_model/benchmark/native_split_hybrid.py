@@ -108,8 +108,8 @@ def run_one(dataset_name: str, seed: int, args) -> Dict[str, float]:
 
     train_y_t = torch.stack([d.y.float().view(-1) for d in train_data])
     standardizer = TargetStandardizer(enabled=True).fit(train_y_t)
-    target_range = (float(train_y_t.min()), float(train_y_t.max()))
-    print(f"  [seed {seed}] train target stats: n={train_y_t.numel()} mean={train_y_t.mean():.3f} std={train_y_t.std():.3f} range={target_range}")
+    target_std = float(train_y_t.std())
+    print(f"  [seed {seed}] train target stats: n={train_y_t.numel()} mean={train_y_t.mean():.3f} std={train_y_t.std():.3f} nrmse_denom={target_std:.4f}")
 
     model = HybridMoLA(
         sm_vocab_size=len(vocab), hidden_dim=args.hidden_dim, output_dim=1,
@@ -162,7 +162,7 @@ def run_one(dataset_name: str, seed: int, args) -> Dict[str, float]:
                 total += loss.item() * batch.num_graphs
                 n += batch.num_graphs
         metrics = {"loss": total / max(n, 1)}
-        metrics.update(regression_metrics(torch.cat(preds_all), torch.cat(targets_all), target_range))
+        metrics.update(regression_metrics(torch.cat(preds_all), torch.cat(targets_all), target_std))
         return metrics
 
     best_val_loss, best_state, epochs_without_improvement = float("inf"), None, 0

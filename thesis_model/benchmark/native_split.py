@@ -2,7 +2,7 @@
 graph+lang (no pretrain) model on the *exact same* per-seed splits MoLA's native data
 organization produced (test/data/rederived_splits/<scaffold|random>/<dataset>/seed_<seed>/
 {train,valid,test}.csv), instead of the fixed official split used by
-thesis_model/benchmark/run_baselines.py / results/fase2_baselines.csv.
+thesis_model/benchmark/run_baselines.py / results/_archive_pre_scaffold/fase2_baselines.csv.
 
 Same protocol as the "graph+lang" cell of run_baselines.py (hidden_dim=256,
 num_layers=3, graph_backbone=gin, dropout=0.3, batch_size=32, lr=1e-3,

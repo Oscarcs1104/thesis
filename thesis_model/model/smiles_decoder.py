@@ -5,7 +5,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 
-from common.selfies_vocab import decode_ids
+from common.selfies_vocab import decode_ids, ids_to_token_string
 
 # Vocabulary/tokenization (build_vocab, tokenize_molecule, encode_batch, decode_ids) used to
 # live here too; they moved to common/selfies_vocab.py since crossmodal_model's generation
@@ -123,3 +123,43 @@ class SmilesDecoder(nn.Module):
                 generated.append(next_id)
 
         return decode_ids(generated, id_to_token)
+
+    @torch.no_grad()
+    def generate_batch(
+        self,
+        latent: torch.Tensor,
+        id_to_token: Dict[int, str],
+        max_len: int = 64,
+        temperature: float = 1.0,
+        sample: bool = True,
+        as_selfies: bool = False,
+    ) -> List[str]:
+        """Vectorized autoregressive decoding for a whole batch of latent prefixes.
+
+        latent: [B, hidden_dim]. Returns B molecule strings. Much faster than calling
+        ``generate`` B times when sampling thousands of molecules.
+        """
+        self.eval()
+        temperature = float(temperature) if float(temperature) > 0 else 1.0
+        batch_size = latent.size(0)
+        device = latent.device
+
+        tokens = torch.full((batch_size, 1), self.start_idx, dtype=torch.long, device=device)
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+        for _ in range(max_len):
+            hidden = self._encode(latent, tokens)
+            logits = self.output(hidden[:, -1]) / temperature
+            if sample:
+                probs = torch.softmax(logits, dim=-1)
+                next_ids = torch.multinomial(probs, num_samples=1).squeeze(-1)
+            else:
+                next_ids = logits.argmax(dim=-1)
+            # Once a row has emitted <END>, keep padding it so the others can finish.
+            next_ids = torch.where(finished, torch.full_like(next_ids, self.pad_idx), next_ids)
+            finished = finished | (next_ids == self.end_idx)
+            tokens = torch.cat([tokens, next_ids.unsqueeze(1)], dim=1)
+            if bool(finished.all()):
+                break
+
+        fn = ids_to_token_string if as_selfies else decode_ids
+        return [fn(row[1:], id_to_token) for row in tokens.tolist()]  # drop the <START> we seeded

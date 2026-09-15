@@ -86,6 +86,27 @@ def encode_batch(texts: Sequence[str], vocab: Dict[str, Dict[str, int]], max_len
     return torch.tensor(inputs, dtype=torch.long, device=device), torch.tensor(targets, dtype=torch.long, device=device)
 
 
+def ids_to_token_string(token_ids: Sequence[int], id_to_token: Dict[int, str]) -> str:
+    """Join predicted token ids into the raw SELFIES token string, without decoding.
+
+    Special tokens are stripped and decoding stops at <END>. This is what SELFIES
+    validity is measured on (it should be ~100%); pass the result through
+    ``selfies.decoder`` to get SMILES and measure SMILES validity separately. Keeping
+    the two apart matters: ``decode_ids`` silently falls back to the raw token string
+    when ``selfies.decoder`` fails, so measuring validity on its output conflates
+    "produced a well-formed SELFIES" with "produced a decodable molecule".
+    """
+    tokens: List[str] = []
+    for token_id in token_ids:
+        token = id_to_token.get(int(token_id), UNK_TOKEN)
+        if token in {PAD_TOKEN, START_TOKEN}:
+            continue
+        if token == END_TOKEN:
+            break
+        tokens.append(token)
+    return "".join(tokens)
+
+
 def decode_ids(token_ids: Sequence[int], id_to_token: Dict[int, str]) -> str:
     """Turn predicted token ids back into a molecule string."""
     tokens: List[str] = []

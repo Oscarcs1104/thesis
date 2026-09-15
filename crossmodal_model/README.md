@@ -26,7 +26,7 @@ entrenamiento) vive fuera de los dos, en `data/` y `common/`.
   el loop de train/eval (`train_one_epoch`/`evaluate`), compartido por los dos scripts de
   `benchmark/`.
 - `benchmark/scaffold_fixed.py` -- benchmark de regresión (Graph+SMILES-only) sobre el
-  split oficial FIJO de la tesis (mismas CSVs que `results/fase2_baselines.csv`).
+  split oficial FIJO de la tesis (mismas CSVs que `results/_archive_pre_scaffold/fase2_baselines.csv`).
   `--positional-smiles` alterna entre MoLA original y el fix A2. Resultados:
   `results/mola/NewTest_benchmark.csv` (original) /
   `results/mola/NewTest_a2fix_benchmark.csv` (A2).
@@ -91,7 +91,7 @@ copiarlos a mano, `data/featurized_pool/` se regenera sola en el primer run de
 
 ## Cómo correr
 
-Regresión (Graph+SMILES-only), split oficial fijo, comparable con `fase2_baselines.csv`:
+Regresión (Graph+SMILES-only), split oficial fijo, comparable con `results/_archive_pre_scaffold/fase2_baselines.csv`:
 ```
 python crossmodal_model/benchmark/scaffold_fixed.py --datasets freesolv --seeds 2025 2026 2027                      # MoLA original
 python crossmodal_model/benchmark/scaffold_fixed.py --datasets freesolv --seeds 2025 2026 2027 --positional-smiles   # fix A2
