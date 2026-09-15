@@ -16,52 +16,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from common.property_bins import PropertyBinner  # re-exported: moved to common/, both halves use it
 from thesis_model.model.smiles_decoder import SmilesDecoder
-
-
-class PropertyBinner:
-    """Quantile bins over a 1-D property. Bin edges are fit on a reference sample
-    (the real dataset's TRAIN targets) so the bins line up with what evaluation
-    conditions on. ``num_bins`` real bins + one 'unconditional' slot at index
-    ``num_bins`` used for unconditional pretraining / classifier-free guidance.
-    """
-
-    def __init__(self, edges: List[float], name: str = "property") -> None:
-        self.edges = list(map(float, edges))          # inner edges, length num_bins - 1
-        self.num_bins = len(self.edges) + 1
-        self.null_bin = self.num_bins                 # index for "no condition"
-        self.name = name
-
-    @classmethod
-    def fit(cls, values, num_bins: int = 10, name: str = "property") -> "PropertyBinner":
-        v = np.asarray(list(values), dtype=np.float64)
-        v = v[np.isfinite(v)]
-        qs = np.linspace(0, 1, num_bins + 1)[1:-1]
-        edges = list(np.quantile(v, qs)) if v.size else list(np.linspace(-1, 1, num_bins - 1))
-        return cls(edges, name=name)
-
-    def to_bin(self, value: float) -> int:
-        return int(np.searchsorted(self.edges, float(value), side="right"))
-
-    def to_bins(self, values) -> np.ndarray:
-        return np.searchsorted(self.edges, np.asarray(values, dtype=np.float64), side="right").astype(np.int64)
-
-    def bin_center(self, bin_idx: int) -> float:
-        lo = self.edges[bin_idx - 1] if bin_idx > 0 else self.edges[0] - (self.edges[1] - self.edges[0] if len(self.edges) > 1 else 1.0)
-        hi = self.edges[bin_idx] if bin_idx < len(self.edges) else self.edges[-1] + (self.edges[-1] - self.edges[-2] if len(self.edges) > 1 else 1.0)
-        return 0.5 * (lo + hi)
-
-    def bin_edges(self, bin_idx: int) -> tuple:
-        lo = self.edges[bin_idx - 1] if bin_idx > 0 else float("-inf")
-        hi = self.edges[bin_idx] if bin_idx < len(self.edges) else float("inf")
-        return lo, hi
-
-    def state_dict(self) -> dict:
-        return {"edges": self.edges, "name": self.name}
-
-    @classmethod
-    def from_state_dict(cls, state: dict) -> "PropertyBinner":
-        return cls(state["edges"], name=state.get("name", "property"))
 
 
 class ConditionalSmilesGenerator(nn.Module):
@@ -126,3 +82,6 @@ class ConditionalSmilesGenerator(nn.Module):
             ))
             remaining -= b
         return out
+
+
+__all__ = ["ConditionalSmilesGenerator", "PropertyBinner"]
