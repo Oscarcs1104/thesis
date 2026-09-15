@@ -34,7 +34,7 @@ single-CSV runs only.
 
 ## 3. Predictor — what is compared
 
-`scripts/run_baselines.py` runs one standardized matrix: **3 datasets × 8 trained
+`thesis_model/benchmark/run_baselines.py` runs one standardized matrix: **3 datasets × 8 trained
 configs × 3 seeds** (`2025, 2026, 2027`) + a computed ensemble, identical protocol
 per cell (AdamW, warmup→plateau LR, grad-clip 1.0, weight-decay 1e-4, batch 32, up
 to 100 epochs, early stop patience 15 on val loss, target standardized on train
@@ -148,7 +148,7 @@ independent of the predictor:
 ```bash
 pip install -r requirements.txt          # + torch/torch-geometric per that file
 python data_pipeline/prepare_all.py      # download raw CSVs + scaffold splits + graph caches
-python scripts/run_baselines.py          # the predictor matrix -> results/baselines.csv
+python thesis_model/benchmark/run_baselines.py          # the predictor matrix -> results/baselines.csv
 ```
 
 `data/zinc15_250K.csv` ships in the repo. `data_pipeline/download_zinc15.py` (the

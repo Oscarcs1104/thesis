@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _apply_shared_protocol(args: argparse.Namespace, cli: argparse.Namespace) -> None:
-    # Identical to scripts/run_baselines.py's _apply_shared_protocol -- same protocol,
+    # Identical to thesis_model/benchmark/run_baselines.py's _apply_shared_protocol -- same protocol,
     # only the split source (--train-path/--val-path/--test-path) differs.
     args.epochs = cli.epochs
     args.patience = cli.patience

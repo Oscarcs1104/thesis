@@ -3,12 +3,15 @@
   1. download ESOL / FreeSolv / Lipophilicity (raw MoleculeNet CSVs) and write a
      frozen SCAFFOLD split to data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
   2. warm the PyG graph cache for every split CSV (OGB-style features)
-  3. warm the graph cache for data/zinc15_250K.csv (generator pretraining pool)
+  3. warm the graph cache for data/zinc15_250K.csv -- OPTIONAL, --skip-zinc turns it
+     off. It fed the superseded pseudo-labelling generator; the conditional
+     generator pretrains on MOSES instead and nothing current reads it.
 
 No deepchem / tensorflow needed. Nothing here is committed -- run it on a fresh
 clone before training.
 
     python data_pipeline/prepare_all.py
+    python data_pipeline/prepare_all.py --skip-zinc        # what the current pipeline needs
     python data_pipeline/prepare_all.py --skip-download    # just rebuild caches
 """
 from __future__ import annotations
@@ -32,6 +35,10 @@ def main() -> None:
     ap.add_argument("--zinc-csv", default="data/zinc15_250K.csv")
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--skip-download", action="store_true")
+    ap.add_argument("--skip-zinc", action="store_true",
+                    help="skip the ZINC15 graph cache. It fed the superseded pseudo-labelling "
+                         "generator; the conditional generator pretrains on MOSES "
+                         "(data_pipeline/moses.py) instead, so nothing current reads it")
     ap.add_argument("--force", action="store_true", help="re-download raw CSVs even if cached")
     args = ap.parse_args()
 
@@ -53,15 +60,17 @@ def main() -> None:
             else:
                 print(f"  MISSING {csv_path} (run without --skip-download)")
 
-    if Path(args.zinc_csv).exists():
+    if args.skip_zinc:
+        print("  skipping ZINC15 (--skip-zinc): superseded by the MOSES corpus")
+    elif Path(args.zinc_csv).exists():
         graphs = load_graph_dataset(args.zinc_csv)
         print(f"  {args.zinc_csv}: {len(graphs)} graphs")
     else:
         print(f"  MISSING {args.zinc_csv} -- run data_pipeline/download_zinc15.py")
 
-    print("\nDone. Train with e.g.:")
-    print("  python training/train.py --dataset-dir data/deepchem_molnet/delaney --graph-backbone gin --seeds 2025 2026 2027")
-    print("  python scripts/run_baselines.py")
+    print("\nDone. Next:")
+    print("  predictor half : python thesis_model/benchmark/run_baselines.py")
+    print("  generator half : sbatch scripts/slurm/block1_data.sbatch   (builds the MOSES corpus)")
 
 
 if __name__ == "__main__":

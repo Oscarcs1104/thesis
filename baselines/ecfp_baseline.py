@@ -4,7 +4,7 @@ This is the point of comparison the whole thesis is judged against: if the
 multimodal model can't beat a gradient-boosted tree on Morgan fingerprints
 (minutes on CPU), the fusion isn't buying anything. Runs through the SAME
 predefined scaffold split and the SAME metrics as every neural config in
-scripts/run_baselines.py, so every row of the results table is comparable.
+thesis_model/benchmark/run_baselines.py, so every row of the results table is comparable.
 """
 from __future__ import annotations
 

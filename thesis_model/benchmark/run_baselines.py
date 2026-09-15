@@ -20,9 +20,9 @@ Configs (per dataset):
 Every dataset uses its DeepChem *scaffold* split from data_pipeline/prepare_all.py.
 
 Usage:
-    python scripts/run_baselines.py
-    python scripts/run_baselines.py --datasets esol --configs ecfp-xgb fusion-concat fusion-xattn fusion-moe ensemble
-    python scripts/run_baselines.py --out results/baselines.csv
+    python thesis_model/benchmark/run_baselines.py
+    python thesis_model/benchmark/run_baselines.py --datasets esol --configs ecfp-xgb fusion-concat fusion-xattn fusion-moe ensemble
+    python thesis_model/benchmark/run_baselines.py --out results/baselines.csv
 """
 from __future__ import annotations
 
