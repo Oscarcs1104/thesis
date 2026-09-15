@@ -156,7 +156,7 @@ def _imap(fn, items, workers: int, chunksize: int, desc: str):
     return out
 
 
-def _load_eval_inchikeys() -> Tuple[Dict[str, set], set]:
+def _load_eval_inchikeys(allow_missing: bool = False) -> Tuple[Dict[str, set], set]:
     """InChIKeys and Murcko scaffolds of every molecule in the three TEST splits."""
     from rdkit import Chem, RDLogger
 
@@ -164,11 +164,21 @@ def _load_eval_inchikeys() -> Tuple[Dict[str, set], set]:
 
     per_dataset: Dict[str, set] = {}
     scaffolds: set = set()
+    missing = [rel for _, rel in EVAL_TEST_CSVS if not (ROOT / rel).exists()]
+    if missing and not allow_missing:
+        raise SystemExit(
+            "Cannot build the corpus: the evaluation test splits do not exist yet.\n"
+            + "".join(f"  missing: {m}\n" for m in missing)
+            + "Run `python data_pipeline/prepare_all.py` first.\n"
+            "Without them the deduplication silently removes nothing, and a corpus that\n"
+            "may overlap the test sets makes the Block 4 transfer result indefensible.\n"
+            "Pass --allow-missing-eval-sets only for a throwaway plumbing test."
+        )
+
     for name, rel in EVAL_TEST_CSVS:
         path = ROOT / rel
         if not path.exists():
-            print(f"  [warn] {rel} missing -- run data_pipeline/prepare_all.py first; "
-                  f"skipping {name} in the overlap check")
+            print(f"  [warn] {rel} missing -- {name} NOT checked for overlap")
             per_dataset[name] = set()
             continue
         keys = set()
@@ -199,8 +209,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--length-percentile", type=float, default=99.5)
     p.add_argument("--workers", type=int, default=max(1, (mp.cpu_count() or 2) - 1))
     p.add_argument("--chunksize", type=int, default=2000)
-    p.add_argument("--min-token-freq", type=int, default=5,
-                   help="SELFIES tokens rarer than this collapse into <OTHER>")
+    p.add_argument("--min-token-freq", type=int, default=1,
+                   help="drop molecules containing a SELFIES token rarer than this. Default 1 "
+                        "keeps every token: the decoder's output vocabulary must be fully "
+                        "decodable, so a token can never be folded into <OTHER>")
+    p.add_argument("--allow-missing-eval-sets", action="store_true",
+                   help="build even if the esol/freesolv/lipo test splits are absent. Only for a "
+                        "throwaway plumbing test: the corpus it produces is NOT deduplicated")
     p.add_argument("--force", action="store_true", help="rebuild even if the cache exists")
     return p.parse_args()
 
@@ -255,7 +270,7 @@ def main() -> None:
 
     # ---------------- remove evaluation-set leakage ----------------
     print("Checking overlap with the esol/freesolv/lipo TEST splits...")
-    eval_keys, eval_scaffolds = _load_eval_inchikeys()
+    eval_keys, eval_scaffolds = _load_eval_inchikeys(args.allow_missing_eval_sets)
     all_eval_keys = set().union(*eval_keys.values()) if eval_keys else set()
     removed_per_dataset = {name: 0 for name, _ in EVAL_TEST_CSVS}
     kept: List[Tuple[str, str, str, int]] = []
@@ -296,20 +311,43 @@ def main() -> None:
     import selfies as sf
 
     counts: Counter = Counter()
-    for s in selfies_strings:
-        counts.update(sf.split_selfies(s))
-    frequent = sorted(tok for tok, c in counts.items() if c >= args.min_token_freq)
+    per_molecule_tokens = [list(sf.split_selfies(s)) for s in selfies_strings]
+    for toks in per_molecule_tokens:
+        counts.update(toks)
+    rare_tokens = {tok for tok, c in counts.items() if c < args.min_token_freq}
+
+    # A rare token must never be folded into <OTHER>: <OTHER> does not decode, so a
+    # generated sequence containing one is not a molecule, and validity-by-construction
+    # -- the entire reason for using SELFIES -- would silently stop holding. Drop the
+    # affected molecules instead, so every id in the vocabulary maps back to real SELFIES.
+    if rare_tokens:
+        drop = {i for i, toks in enumerate(per_molecule_tokens) if rare_tokens & set(toks)}
+        print(f"Dropping {len(drop)} molecules that use one of {len(rare_tokens)} tokens seen "
+              f"< {args.min_token_freq} times (kept out of the vocabulary so every emitted "
+              f"token stays decodable)")
+        keep_idx = [i for i in range(len(selfies_strings)) if i not in drop]
+        canonical = [canonical[i] for i in keep_idx]
+        inchikeys = [inchikeys[i] for i in keep_idx]
+        selfies_strings = [selfies_strings[i] for i in keep_idx]
+        corpus_scaffolds = [corpus_scaffolds[i] for i in keep_idx]
+        per_molecule_tokens = [per_molecule_tokens[i] for i in keep_idx]
+        lengths = lengths[keep_idx]
+        counts = Counter()
+        for toks in per_molecule_tokens:
+            counts.update(toks)
+
     token_to_id = {tok: i for i, tok in enumerate(SPECIAL_TOKENS)}
-    for tok in frequent:
+    for tok in sorted(counts):
         token_to_id.setdefault(tok, len(token_to_id))
-    rare = len(counts) - len(frequent)
-    print(f"Vocabulary: {len(token_to_id)} tokens ({len(SPECIAL_TOKENS)} special, {len(frequent)} SELFIES, "
-          f"{rare} rare tokens folded into {UNK_TOKEN})")
+    print(f"Vocabulary: {len(token_to_id)} tokens ({len(SPECIAL_TOKENS)} special, "
+          f"{len(counts)} SELFIES -- all of them decodable)")
     if len(token_to_id) > np.iinfo(np.int16).max:
         raise SystemExit("vocabulary exceeds int16; widen the token array dtype")
+    del per_molecule_tokens
 
     # ---------------- encode ----------------
     print("Encoding to int16...")
+    n_truncated = int((lengths > max_len).sum())  # recomputed: molecules may have been dropped
     tokens = np.zeros((len(selfies_strings), max_len), dtype=np.int16)
     start = time.time()
     if args.workers <= 1:
@@ -359,6 +397,7 @@ def main() -> None:
         "n_internal_duplicates": len(rows) - len(unique),
         "n_removed_eval_overlap": n_removed,
         "n_molecules": len(canonical),
+        "deduplicated_against_eval": not bool(args.allow_missing_eval_sets),
         "max_len": max_len,
         "n_truncated": n_truncated,
         "length_percentiles": pcts,
