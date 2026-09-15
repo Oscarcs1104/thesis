@@ -1,30 +1,37 @@
-"""Pair-conditioned generator: encoder sees M_a, condition is a delta, decoder writes M_b.
+"""Conditional molecule generation: encoder sees a generic framework, decoder writes a molecule.
 
-The previous design trained on (M -> M, y = f(M)): the target molecule was inside the
-decoder's own memory, so reproducing it never required reading the conditioning token,
-and the gradient had no reason to teach the decoder to use it. Here the target is a
-*different* molecule, so the delta is the only thing that says which one:
+    encoder input  : generic framework   the Murcko scaffold's topology, with atom types
+                                         and bond orders erased
+    condition      : logP = 2.5          an ABSOLUTE target, binned
+    decoder target : the complete molecule
 
-    encoder input  : M_a          chlorobenzene, logP 2.84
-    condition      : delta logP   -0.57
-    decoder target : M_b          fluorobenzene, logP 2.27
+The previous design trained on (M -> M, y = f(M)): the target was inside the decoder's
+own memory, so reproducing it never required reading the conditioning token and the
+gradient had no reason to teach the decoder to use it. Here the framework fixes only the
+core topology; the decoder must decide which positions are N, O or S, where the double
+bonds go, and what hangs off the core -- and heteroatoms are exactly what determines
+logP and TPSA.
 
-M_b is not in the memory. H(target | memory, delta) > 0 by construction, and the encoder
-stays load-bearing -- without it the decoder does not know what to modify. That is what
-makes the graph/SMILES ablation measurable on generation quality, which is the thesis.
+Measured on the full MOSES corpus (data_pipeline/report_corpus.py):
+  - 70,885 distinct frameworks for 1.94M molecules, 27.3 per bucket, and 92.7% of
+    molecules sit in a bucket of 10 or more.
+  - 82% of the total logP variance survives INSIDE a framework bucket (against 55.9%
+    for the Murcko scaffold, which already fixes 77% of a molecule's atoms).
+So the framework leaves the property undecided and the conditioning token is what
+decides it. That is the property the original design lacked.
 
 Conditioning mechanism: one prefix token per property, each a learned embedding of a
-quantile bin (see common/property_bins.py). Bins rather than a raw scalar through
-Linear(1 -> H), which is a weak low-frequency signal and was fed unstandardized before.
-A prepended token rather than FiLM because the token was ignored for being *redundant*,
-not for being a token; with pairs that redundancy is gone. If it still gets ignored, the
-diagnostics below say so and FiLM is the next move.
+quantile bin (common/property_bins.py). Bins rather than a raw scalar through
+Linear(1 -> H), which is a weak low-frequency signal and was previously fed
+unstandardized. A prepended token rather than FiLM because the old token was ignored for
+being *redundant*, not for being a token, and that redundancy is now gone; if it is still
+ignored, the diagnostics below say so and FiLM is the next move.
 
 Diagnostics built in:
-  - condition dropout to each property's null bin, independently, so sampling can ask
-    for "delta logP = +1, don't care about the rest" and classifier-free guidance works.
-  - guided_logits(): if raising the guidance weight changes nothing, the condition is
-    not being used. That check costs one extra forward pass and no retraining.
+  - condition dropout to each property's null bin, independently, so sampling can ask for
+    "logP = 2.5, don't care about the rest" and classifier-free guidance works.
+  - guided_logits(): if raising the guidance weight changes nothing, the condition is not
+    being used. Costs one extra forward pass and no retraining.
 """
 from __future__ import annotations
 
@@ -74,8 +81,8 @@ class ConditionEmbedding(nn.Module):
         return torch.stack([emb(bins[:, i]) for i, emb in enumerate(self.embeddings)], dim=1)
 
 
-class PairConditionalGenerator(nn.Module):
-    """HybridMoLA encoder over M_a + delta-bin prefix tokens + the SELFIES decoder.
+class ConditionalMoleculeGenerator(nn.Module):
+    """HybridMoLA encoder over the framework + property-bin prefix tokens + SELFIES decoder.
 
     `mola` is a HybridMoLA; use_graph / use_smiles on its encoder select the ablation arm.
     """
@@ -97,7 +104,7 @@ class PairConditionalGenerator(nn.Module):
         super().__init__()
         encoder = mola.encoder
         if encoder.use_smiles and not encoder.positional_smiles:
-            raise ValueError("PairConditionalGenerator needs positional_smiles=True whenever "
+            raise ValueError("ConditionalMoleculeGenerator needs positional_smiles=True whenever "
                              "the SMILES branch is enabled")
         self.mola = mola
         self.hidden_dim = hidden_dim
@@ -166,4 +173,4 @@ class PairConditionalGenerator(nn.Module):
         return [decode_ids(row[1:], vocab["id_to_token"]) for row in tokens.tolist()]
 
 
-__all__ = ["PairConditionalGenerator", "ConditionEmbedding"]
+__all__ = ["ConditionalMoleculeGenerator", "ConditionEmbedding"]
