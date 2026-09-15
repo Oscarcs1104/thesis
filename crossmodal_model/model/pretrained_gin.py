@@ -91,13 +91,13 @@ class GINConv(MessagePassing):
 class PretrainedGIN(nn.Module):
     """The pretrained GIN, exposing every layer's pooled state for MoLA-style fusion.
 
-    `proj` maps the frozen 300-dim space onto the fusion width, so the backbone keeps its
-    own dimensionality and only the projection is learned when the backbone is frozen.
+    Outputs stay at emb_dim; the projection to the fusion width lives in PretrainedMoLA.
+    That keeps a frozen backbone a pure, deterministic function of the molecule, so its
+    per-layer states can be computed once for a dataset and reused every epoch.
     """
 
     def __init__(
         self,
-        hidden_dim: int,
         num_layer: int = 5,
         emb_dim: int = 300,
         drop_ratio: float = 0.5,
@@ -132,9 +132,8 @@ class PretrainedGIN(nn.Module):
             for p in self.parameters():
                 p.requires_grad = False
 
-        # Learned regardless of freezing: the pretrained space is 300-dim, the fusion
-        # runs at hidden_dim.
-        self.proj = nn.Linear(emb_dim, hidden_dim)
+        # No projection here: it lives in the fusion module, so a frozen backbone is a
+        # pure function of the molecule and its outputs can be precomputed once.
 
     def load_pretrained(self, path: Path) -> None:
         state = torch.load(path, map_location="cpu", weights_only=True)
@@ -142,7 +141,7 @@ class PretrainedGIN(nn.Module):
         # Loud on purpose. A silent key mismatch means randomly initialized weights
         # posing as a pretrained backbone, and then every number in the ablation table
         # is about a model nobody trained.
-        real_missing = [k for k in missing if not k.startswith("proj.")]
+        real_missing = list(missing)
         if real_missing or unexpected:
             raise RuntimeError(
                 f"pretrained GIN did not load cleanly from {path}\n"
@@ -160,14 +159,23 @@ class PretrainedGIN(nn.Module):
                 m.eval()
         return self
 
+    @property
+    def _dropout_active(self) -> bool:
+        """F.dropout takes `training` explicitly, and self.training stays True on this
+        module even after train() puts its children in eval. Without this a frozen
+        backbone would still be stochastic -- non-deterministic, and impossible to cache.
+        """
+        return self.training and not self.frozen
+
     def forward(self, x, edge_index, edge_attr, batch) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-        """Returns (final node states projected to hidden_dim, per-layer pooled states)."""
+        """Returns (final node states, per-layer pooled states), both at emb_dim."""
         if x.dtype != torch.long or x.size(1) != 2:
             raise ValueError(
                 f"PretrainedGIN expects the Hu et al. schema: long x of shape [N, 2], got "
                 f"{x.dtype} {tuple(x.shape)}. Featurize with "
                 f"data_pipeline.features_pretrain_gnn.smiles_to_data_pretrain."
             )
+        drop = self._dropout_active
         h = self.x_embedding1(x[:, 0]) + self.x_embedding2(x[:, 1])
         layer_states: List[torch.Tensor] = []
         for i, (conv, bn) in enumerate(zip(self.gnns, self.batch_norms)):
@@ -175,11 +183,11 @@ class PretrainedGIN(nn.Module):
             # Upstream drops the ReLU on the last layer; keeping it would change the
             # representation the checkpoint was trained to produce.
             if i == self.num_layer - 1:
-                h = F.dropout(h, self.drop_ratio, training=self.training)
+                h = F.dropout(h, self.drop_ratio, training=drop)
             else:
-                h = F.dropout(F.relu(h), self.drop_ratio, training=self.training)
-            layer_states.append(self.proj(_POOLS[self.pool](h, batch)))
-        return self.proj(h), layer_states
+                h = F.dropout(F.relu(h), self.drop_ratio, training=drop)
+            layer_states.append(_POOLS[self.pool](h, batch))
+        return h, layer_states
 
 
 __all__ = ["PretrainedGIN", "GINConv", "download_pretrained_gin", "PRETRAINED_VARIANTS"]

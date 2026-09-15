@@ -55,7 +55,6 @@ class PretrainedLanguageEncoder(nn.Module):
 
     def __init__(
         self,
-        hidden_dim: int,
         model_key: str = "chemberta",
         num_layers: int = 3,
         freeze: bool = True,
@@ -77,9 +76,10 @@ class PretrainedLanguageEncoder(nn.Module):
         self.backbone = AutoModel.from_pretrained(self.model_name, **kwargs)
         self.tokenizer = _load_tokenizer(self.model_name, trust_remote_code=True)
 
-        lm_hidden = int(getattr(self.backbone.config, "hidden_size", hidden_dim))
+        self.lm_hidden = int(getattr(self.backbone.config, "hidden_size", 768))
         self.n_backbone_layers = int(getattr(self.backbone.config, "num_hidden_layers", 0))
-        self.proj = nn.Linear(lm_hidden, hidden_dim)
+        # No projection here: it lives in PretrainedMoLA, so a frozen backbone stays a
+        # pure function of the SMILES string and can be precomputed once per dataset.
 
         if freeze:
             for p in self.backbone.parameters():
@@ -126,7 +126,7 @@ class PretrainedLanguageEncoder(nn.Module):
         return (states * m).sum(dim=1) / m.sum(dim=1).clamp_min(1e-9)
 
     def forward(self, smiles: Sequence[str], device: torch.device) -> List[torch.Tensor]:
-        """Returns num_layers pooled tensors of shape [B, hidden_dim]."""
+        """Returns num_layers pooled tensors of shape [B, lm_hidden]."""
         texts = ["" if s is None else str(s) for s in smiles]
         enc = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True,
                              max_length=self.max_length)
@@ -144,8 +144,7 @@ class PretrainedLanguageEncoder(nn.Module):
         else:
             pooled = [self._masked_mean(out.last_hidden_state, mask)] * self.num_layers
 
-        # Detached above when frozen, so the projection is what carries the gradient.
-        return [self.proj(p.detach() if self.freeze else p) for p in pooled]
+        return [p.detach() if self.freeze else p for p in pooled]
 
 
 __all__ = ["PretrainedLanguageEncoder", "KNOWN_MODELS"]

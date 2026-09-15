@@ -57,7 +57,11 @@ from common.repro import (  # noqa: E402
     seed_everything,
     step_scheduler,
 )
-from crossmodal_model.model.mola_pretrained import CONFIGS, build_config  # noqa: E402
+from crossmodal_model.model.mola_pretrained import (  # noqa: E402
+    CONFIGS,
+    build_config,
+    precompute_features,
+)
 from crossmodal_model.train.core import DATASETS  # noqa: E402
 from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa: E402
 
@@ -84,6 +88,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-freeze-lm", dest="freeze_lm", action="store_false")
     p.add_argument("--freeze-gin", dest="freeze_gin", action="store_true", default=True)
     p.add_argument("--no-freeze-gin", dest="freeze_gin", action="store_false")
+    p.add_argument("--no-cache", action="store_true",
+                   help="recompute frozen backbones every epoch instead of caching them")
     p.add_argument("--out", type=str, default=str(ROOT / "results" / "pretrained_ablation.csv"))
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()
@@ -121,21 +127,66 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    loaders = {
-        k: GeomDataLoader(
-            v, batch_size=args.batch_size, shuffle=(k == "train"),
-            # BatchNorm1d cannot compute statistics from a single row, and a trailing
-            # batch of one is common on FreeSolv-sized splits.
-            drop_last=(k == "train" and len(v) > args.batch_size),
-        )
+    # Deterministic loaders: these feed the feature cache, where a reordered or
+    # truncated split would silently misalign features and targets.
+    ordered = {
+        k: GeomDataLoader(v, batch_size=args.batch_size, shuffle=False, drop_last=False)
         for k, v in splits.items()
     }
+    # Separate shuffled loader for the uncached path. drop_last guards BatchNorm1d, which
+    # cannot compute statistics from a single row, and a trailing batch of one is common
+    # on FreeSolv-sized splits.
+    loaders = dict(ordered)
+    loaders["train"] = GeomDataLoader(
+        splits["train"], batch_size=args.batch_size, shuffle=True,
+        drop_last=len(splits["train"]) > args.batch_size,
+    )
 
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.weight_decay
     )
     scheduler = build_scheduler("plateau", optimizer, args.warmup_epochs, args.epochs, 0.01, 0.5, 5)
+
+    # With every backbone frozen their per-layer states are a deterministic function of
+    # the molecule, so they run once here instead of once per epoch. On a 100-epoch run
+    # that is the whole cost of the job.
+    cached = None
+    if model.backbones_frozen and not args.no_cache:
+        t0 = time.time()
+        cached = {k: precompute_features(model, v, device) for k, v in ordered.items()}
+        print(f"  precomputed frozen backbone features in {time.time() - t0:.0f}s", flush=True)
+
+    def _cached_batches(feats, shuffle: bool):
+        n = feats["y"].size(0)
+        order = torch.randperm(n) if shuffle else torch.arange(n)
+        for i in range(0, n, args.batch_size):
+            sel = order[i: i + args.batch_size]
+            yield (
+                feats["graph"][sel].to(device) if "graph" in feats else None,
+                feats["lm"][sel].to(device) if "lm" in feats else None,
+                feats["y"][sel].to(device).view(-1, 1),
+            )
+
+    def epoch_cached(feats, train: bool) -> Dict[str, float]:
+        model.train(train)
+        preds_all, targets_all, total, n = [], [], 0.0, 0
+        for graph, lm, targets in _cached_batches(feats, shuffle=train):
+            with torch.set_grad_enabled(train):
+                preds = model.fuse(graph, lm)[-1]
+                loss = criterion(preds, standardizer.transform(targets))
+            if train:
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                optimizer.step()
+            preds_all.append(standardizer.inverse_transform(preds).detach().cpu())
+            targets_all.append(targets.detach().cpu())
+            total += loss.item() * targets.size(0)
+            n += targets.size(0)
+        m = regression_metrics(torch.cat(preds_all), torch.cat(targets_all), target_std)
+        m["loss"] = total / max(n, 1)
+        return m
 
     def epoch(loader, train: bool) -> Dict[str, float]:
         model.train(train)
@@ -159,10 +210,12 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
         m["loss"] = total / max(n, 1)
         return m
 
+    run = (lambda split, train: epoch_cached(cached[split], train)) if cached is not None         else (lambda split, train: epoch(loaders[split], train))
+
     best_rmse, best_epoch, best_state, stale = float("inf"), 0, None, 0
     for ep in range(1, args.epochs + 1):
-        epoch(loaders["train"], True)
-        val = epoch(loaders["valid"], False)
+        run("train", True)
+        val = run("valid", False)
         step_scheduler(scheduler, val["rmse"])
         if val["rmse"] < best_rmse:
             best_rmse, best_epoch, stale = val["rmse"], ep, 0
@@ -174,7 +227,7 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    test = epoch(loaders["test"], False)
+    test = run("test", False)
     return {
         "dataset": dataset, "config": config, "seed": seed,
         "rmse": test["rmse"], "mae": test["mae"], "nrmse": test["nrmse"], "r2": test["r2"],
