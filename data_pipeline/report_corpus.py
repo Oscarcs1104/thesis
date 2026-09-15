@@ -27,7 +27,14 @@ if str(ROOT) not in sys.path:
 
 
 def _coverage(args):
-    """(heavy atoms in scaffold, heavy atoms in molecule, generic-framework atoms)."""
+    """(heavy atoms in scaffold, heavy atoms in molecule, generic framework SMILES).
+
+    The generic framework is MakeScaffoldGeneric applied to the SCAFFOLD, not to the
+    molecule: it keeps the skeleton's topology and erases atom types and bond orders.
+    So it has the same atom count as the Murcko scaffold but carries far less
+    information -- the decoder must decide which positions are N, O or S and where the
+    double bonds go, and heteroatoms are exactly what drives logP and TPSA.
+    """
     smiles, scaffold = args
     from rdkit import Chem, RDLogger
 
@@ -38,17 +45,16 @@ def _coverage(args):
     if mol is None:
         return None
     n_mol = mol.GetNumHeavyAtoms()
-    n_scaf = 0
+    n_scaf, generic_smiles = 0, ""
     if scaffold:
         s = Chem.MolFromSmiles(scaffold)
-        n_scaf = s.GetNumHeavyAtoms() if s is not None else 0
-    n_generic = 0
-    try:
-        generic = MurckoScaffold.MakeScaffoldGeneric(mol)
-        n_generic = generic.GetNumHeavyAtoms()
-    except Exception:
-        pass
-    return n_scaf, n_mol, n_generic
+        if s is not None:
+            n_scaf = s.GetNumHeavyAtoms()
+            try:
+                generic_smiles = Chem.MolToSmiles(MurckoScaffold.MakeScaffoldGeneric(s))
+            except Exception:
+                generic_smiles = ""
+    return n_scaf, n_mol, generic_smiles
 
 
 def main() -> None:
@@ -136,18 +142,32 @@ def main() -> None:
     print(f"  scaffold covers {frac.mean():.1%} of the molecule "
           f"(p25 {np.percentile(frac, 25):.0%}, p75 {np.percentile(frac, 75):.0%})")
     print(f"  atoms left to generate: {(mol - scaf).mean():.1f} on average")
+
+    # How much the two candidate constraints actually pin down, measured the same way:
+    # how many molecules in the sample share one. A constraint that many molecules share
+    # is a constraint that leaves the property token something to decide.
+    generic = [r[2] for r in res if r[2]]
+    n_sample = len(res)
+    scaf_counts = Counter(s for s, _ in items if s)
+    gen_counts = Counter(generic)
+    print("\n  constraint strength (molecules sharing the same constraint, in this sample):")
+    print(f"    {'constraint':<22} {'distinct':>10} {'mean/bucket':>12} {'median':>8}")
+    for label, c in (("Murcko scaffold", scaf_counts), ("generic framework", gen_counts)):
+        v = np.array(sorted(c.values(), reverse=True)) if c else np.array([0])
+        print(f"    {label:<22} {len(c):>10,} {v.mean():>12.1f} {np.median(v):>8.0f}")
+    ratio = (len(scaf_counts) / max(len(gen_counts), 1)) if gen_counts else float("nan")
+    print(f"    -> erasing atom types and bond orders collapses {ratio:.1f} Murcko scaffolds "
+          f"into one framework")
     print()
-    if frac.mean() > 0.8:
-        print("  >80% covered: conditioning on the Murcko scaffold leaves little to invent, so")
-        print("  the task drifts toward copying. Prefer the GENERIC FRAMEWORK (atom types")
-        print("  erased, topology kept), which puts the property back in charge.")
-    elif frac.mean() < 0.5:
-        print("  <50% covered: the Murcko scaffold underspecifies the molecule heavily. Good")
-        print("  entropy for scaffold-conditioned generation; the generic framework would")
-        print("  likely be too loose a constraint.")
+    if frac.mean() > 0.7:
+        print(f"  The Murcko scaffold already fixes {frac.mean():.0%} of the molecule and leaves only")
+        print(f"  {(mol - scaf).mean():.1f} atoms to invent. That is decoration, not generation.")
+        print("  The GENERIC FRAMEWORK keeps the same skeleton size but erases atom types and")
+        print("  bond orders, so the decoder must place the heteroatoms -- which is exactly what")
+        print("  determines logP and TPSA. Same constraint shape, far more entropy.")
     else:
-        print("  50-80% covered: the Murcko scaffold is a reasonable constraint. Start there,")
-        print("  and switch to the generic framework if generated novelty comes out low.")
+        print("  The Murcko scaffold leaves substantial freedom; it is a usable constraint on")
+        print("  its own, and the generic framework would likely be too loose.")
 
 
 if __name__ == "__main__":
