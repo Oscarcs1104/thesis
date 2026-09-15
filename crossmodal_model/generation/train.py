@@ -39,7 +39,9 @@ TEST_ROOT = THIS_DIR.parent.parent
 if str(TEST_ROOT) not in sys.path:
     sys.path.append(str(TEST_ROOT))
 
-import deepchem as dc  # noqa: E402
+# deepchem is imported lazily inside build_data(): it pulls in TensorFlow, and
+# train_hybrid.py imports sample_and_evaluate from this module without ever
+# calling build_data() -- see crossmodal_model/train/core.py::_dc for the same note.
 from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
 
 from crossmodal_model.data.featurize import build_vocab as build_char_vocab, prepare_data  # noqa: E402
@@ -81,7 +83,9 @@ def parse_args() -> argparse.Namespace:
 def build_data(dataset_name: str, max_sm_len: int):
     cfg = DATASETS[dataset_name]
     csv_dir = TEST_ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
-    featurizer = dc.feat.MolGraphConvFeaturizer()
+    from crossmodal_model.train.core import _dc
+
+    featurizer = _dc().feat.MolGraphConvFeaturizer()
 
     def _load(split):
         ds = load_fixed_split(csv_dir / f"{split}.csv", cfg["target_col"], featurizer)

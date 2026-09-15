@@ -15,23 +15,35 @@ import numpy as np
 import pandas as pd
 import torch
 
-import deepchem as dc
-
 from crossmodal_model.data.featurize import build_vocab, prepare_data
 
 TEST_ROOT = Path(__file__).resolve().parent.parent.parent  # test/crossmodal_model/train/ -> test/
 
+# Target column is "y" for all three: data_pipeline/download_molnet.py renames each
+# dataset's native column (`measured log solubility...`, `expt`, `exp`) to `y` when it
+# writes csv/{train,valid,test}.csv, so the downstream code never has to know which
+# dataset it is looking at.
 DATASETS: Dict[str, Dict[str, str]] = {
-    "esol": {"dir": "delaney", "target_col": "measured log solubility in mols per litre"},
+    "esol": {"dir": "delaney", "target_col": "y"},
     "freesolv": {"dir": "freesolv", "target_col": "y"},
-    "lipo": {"dir": "lipo", "target_col": "exp"},
+    "lipo": {"dir": "lipo", "target_col": "y"},
 }
+
+
+def _dc():
+    """deepchem imported lazily: it pulls in TensorFlow, and the modules that only
+    want DATASETS (generation/train_hybrid.py, generation/ablate_prop_token.py,
+    benchmark/scaffold_fixed_hybrid.py) featurize with data_pipeline instead and must
+    not pay for it -- nor fail on a machine where TensorFlow isn't installed."""
+    import deepchem as dc
+
+    return dc
 
 
 # --------------------------------------------------------------------------- #
 # Data: featurize the thesis's own official-split CSVs (not a re-derived split)
 # --------------------------------------------------------------------------- #
-def load_fixed_split(csv_path: Path, target_col: str, featurizer) -> "dc.data.NumpyDataset":
+def load_fixed_split(csv_path: Path, target_col: str, featurizer):
     df = pd.read_csv(csv_path)
     smiles = df["smiles"].astype(str).tolist()
     y = df[target_col].astype(float).to_numpy().reshape(-1, 1)
@@ -46,13 +58,13 @@ def load_fixed_split(csv_path: Path, target_col: str, featurizer) -> "dc.data.Nu
     y_kept = y[keep]
     ids_kept = np.array([smiles[i] for i in keep])
     w_kept = np.ones_like(y_kept)
-    return dc.data.NumpyDataset(X=X_kept, y=y_kept, w=w_kept, ids=ids_kept)
+    return _dc().data.NumpyDataset(X=X_kept, y=y_kept, w=w_kept, ids=ids_kept)
 
 
 def build_datasets(dataset_name: str, max_sm_len: int):
     cfg = DATASETS[dataset_name]
     csv_dir = TEST_ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
-    featurizer = dc.feat.MolGraphConvFeaturizer()
+    featurizer = _dc().feat.MolGraphConvFeaturizer()
 
     print(f"Featurizing {dataset_name} from {csv_dir} (official scaffold split, same CSVs as fase2_baselines.csv)...")
     train_ds = load_fixed_split(csv_dir / "train.csv", cfg["target_col"], featurizer)
