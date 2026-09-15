@@ -1,8 +1,14 @@
 #!/bin/bash
 # Block 1 -- MOSES corpus + oracle labels + analog pairs. CPU only, no GPU.
 #
-#   SMOKE=1 sbatch scripts/slurm/block1_data.sbatch    # 50k molecules, ~5 min
-#   FORCE=1 sbatch scripts/slurm/block1_data.sbatch    # the full 1.9M
+#   LIMIT=5000  sbatch scripts/slurm/block1_data.sbatch   # plumbing check, ~1 min
+#   LIMIT=50000 sbatch scripts/slurm/block1_data.sbatch   # smallest useful smoke, ~5 min
+#   FORCE=1     sbatch scripts/slurm/block1_data.sbatch   # the full 1.9M
+#
+# Below ~50k, stage 1c finds almost no pairs, and that is arithmetic rather than a
+# bug: MOSES holds hundreds of thousands of distinct Murcko scaffolds, so in a
+# small sample nearly every molecule is alone in its scaffold and has nothing to
+# pair with. A LIMIT=5000 run still exercises 1a and 1b end to end.
 #
 # Check --partition against `sinfo -o "%P %c %m"` before the first submit, and
 # override resources there rather than editing this file:
@@ -32,13 +38,13 @@ source "${THESIS_VENV:-$HOME/venvs/thesis}/bin/activate"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTHONUNBUFFERED=1
 
 W="${SLURM_CPUS_PER_TASK:-8}"
-LIMIT=$([[ "${SMOKE:-0}" == "1" ]] && echo "--limit 50000" || echo "")
+LIMIT_ARG=${LIMIT:+--limit $LIMIT}
 F=${FORCE:+--force}
 
 # Fail in seconds on a bad env instead of after the corpus download.
 python -c "import rdkit, selfies, numpy, pandas"
 
-python data_pipeline/moses.py        --out-dir data/moses    --workers "$W" $LIMIT $F
+python data_pipeline/moses.py        --out-dir data/moses    --workers "$W" $LIMIT_ARG $F
 python data_pipeline/rdkit_labels.py --corpus-dir data/moses --workers "$W" $F
 # No --balance-delta on the first run: read the delta histogram this prints first.
 python data_pipeline/mine_pairs.py   --corpus-dir data/moses --workers "$W" $F

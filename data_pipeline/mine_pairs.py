@@ -223,7 +223,15 @@ def main() -> None:
                     print(f"  {i}/{len(chunks)} chunks, {len(collected)} pairs ({time.time() - start:.0f}s)", flush=True)
 
     if not collected:
-        raise SystemExit("no pairs found -- loosen --tanimoto-min / raise --candidates-per-mol")
+        if len(chunks) < 50:
+            raise SystemExit(
+                f"No pairs found, but only {len(chunks)} scaffold buckets had 2+ members out of "
+                f"{int(valid.sum())} molecules. On a small --limit run that is arithmetic, not a "
+                f"bug: MOSES holds hundreds of thousands of distinct Murcko scaffolds, so in a "
+                f"small sample nearly every molecule is alone in its scaffold. Rebuild the corpus "
+                f"with --limit 50000 or more."
+            )
+        raise SystemExit("No pairs found -- loosen --tanimoto-min or raise --candidates-per-mol.")
     pairs = np.asarray(collected, dtype=np.int32)
     deltas = (labels[pairs[:, 1]] - labels[pairs[:, 0]]).astype(np.float32)
     print(f"Mined {len(pairs)} analog pairs in {time.time() - start:.0f}s")
