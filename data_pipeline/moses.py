@@ -102,16 +102,38 @@ def _scaffold_one(smiles: str) -> str:
         return ""
 
 
-def _tokenize_one(args: Tuple[str, Dict[str, int], int]) -> List[int]:
+_TOKENIZE_CFG: dict = {}
+
+
+def _init_tokenizer(token_to_id: Dict[str, int], max_len: int) -> None:
+    """Vocabulary goes to the workers once at fork, not attached to every task.
+
+    Passing it inside each item would pickle the whole dict 1.9M times over the pool's
+    IPC pipe -- gigabytes of traffic to send the same few KB again and again.
+    """
+    _TOKENIZE_CFG["token_to_id"] = token_to_id
+    _TOKENIZE_CFG["max_len"] = max_len
+    _TOKENIZE_CFG["unk"] = token_to_id[UNK_TOKEN]
+
+
+def _tokenize_one(encoded: str) -> np.ndarray:
     """SELFIES string -> padded id row. <START>/<END> are added by the trainer, not here:
     storing them would waste two slots per molecule across 1.9M rows and force a
-    re-encode if the special-token layout ever changes."""
-    encoded, token_to_id, max_len = args
+    re-encode if the special-token layout ever changes.
+
+    Returns int16 directly: a Python list of 72 ints costs ~600 bytes, so 1.9M of them
+    would be over a gigabyte of interpreter objects before np.asarray ever runs.
+    """
     import selfies as sf
 
-    unk = token_to_id[UNK_TOKEN]
-    ids = [token_to_id.get(tok, unk) for tok in sf.split_selfies(encoded)][:max_len]
-    return ids + [0] * (max_len - len(ids))
+    token_to_id = _TOKENIZE_CFG["token_to_id"]
+    max_len, unk = _TOKENIZE_CFG["max_len"], _TOKENIZE_CFG["unk"]
+    row = np.zeros(max_len, dtype=np.int16)
+    for i, tok in enumerate(sf.split_selfies(encoded)):
+        if i >= max_len:
+            break
+        row[i] = token_to_id.get(tok, unk)
+    return row
 
 
 # --------------------------------------------------------------------------- #
@@ -288,12 +310,20 @@ def main() -> None:
 
     # ---------------- encode ----------------
     print("Encoding to int16...")
-    encoded_rows = _imap(
-        _tokenize_one,
-        [(s, token_to_id, max_len) for s in selfies_strings],
-        args.workers, args.chunksize, "encoded",
-    )
-    tokens = np.asarray(encoded_rows, dtype=np.int16)
+    tokens = np.zeros((len(selfies_strings), max_len), dtype=np.int16)
+    start = time.time()
+    if args.workers <= 1:
+        _init_tokenizer(token_to_id, max_len)
+        for i, s in enumerate(selfies_strings):
+            tokens[i] = _tokenize_one(s)
+    else:
+        with mp.Pool(args.workers, initializer=_init_tokenizer, initargs=(token_to_id, max_len)) as pool:
+            # Written straight into the preallocated array: collecting 1.9M rows into a
+            # list first would double peak memory for no reason. imap keeps order.
+            for i, row in enumerate(pool.imap(_tokenize_one, selfies_strings, chunksize=args.chunksize)):
+                tokens[i] = row
+                if (i + 1) % 500_000 == 0:
+                    print(f"  encoded: {i + 1}/{len(selfies_strings)} ({time.time() - start:.0f}s)", flush=True)
     lengths_clipped = np.minimum(lengths, max_len).astype(np.int16)
 
     # ---------------- write ----------------

@@ -208,20 +208,33 @@ def main() -> None:
     print(f"Mining pairs on {args.workers} workers "
           f"(Tanimoto in [{args.tanimoto_min}, {args.tanimoto_max}])...")
     start = time.time()
-    collected: List[Tuple[int, int]] = []
+    # Each chunk's result is converted to int32 straight away and only the arrays are
+    # kept. At full scale this yields tens of millions of pairs; holding them as Python
+    # tuples first would cost ~70 bytes each, gigabytes of interpreter objects, before
+    # the final array is even allocated.
+    blocks: List[np.ndarray] = []
+    n_collected = 0
+
+    def _absorb(res) -> None:
+        nonlocal n_collected
+        if res:
+            blocks.append(np.asarray(res, dtype=np.int32))
+            n_collected += len(res)
+
     if args.workers <= 1:
         _init_worker(cfg)
         for i, chunk in enumerate(chunks, 1):
-            collected.extend(_mine_chunk(chunk))
+            _absorb(_mine_chunk(chunk))
             if i % 500 == 0 or i == len(chunks):
-                print(f"  {i}/{len(chunks)} chunks, {len(collected)} pairs ({time.time() - start:.0f}s)", flush=True)
+                print(f"  {i}/{len(chunks)} chunks, {n_collected} pairs ({time.time() - start:.0f}s)", flush=True)
     else:
         with mp.Pool(args.workers, initializer=_init_worker, initargs=(cfg,)) as pool:
             for i, res in enumerate(pool.imap_unordered(_mine_chunk, chunks, chunksize=8), 1):
-                collected.extend(res)
+                _absorb(res)
                 if i % 500 == 0 or i == len(chunks):
-                    print(f"  {i}/{len(chunks)} chunks, {len(collected)} pairs ({time.time() - start:.0f}s)", flush=True)
+                    print(f"  {i}/{len(chunks)} chunks, {n_collected} pairs ({time.time() - start:.0f}s)", flush=True)
 
+    collected = blocks
     if not collected:
         if len(chunks) < 50:
             raise SystemExit(
@@ -232,7 +245,8 @@ def main() -> None:
                 f"with --limit 50000 or more."
             )
         raise SystemExit("No pairs found -- loosen --tanimoto-min or raise --candidates-per-mol.")
-    pairs = np.asarray(collected, dtype=np.int32)
+    pairs = np.concatenate(blocks, axis=0)
+    del blocks
     deltas = (labels[pairs[:, 1]] - labels[pairs[:, 0]]).astype(np.float32)
     print(f"Mined {len(pairs)} analog pairs in {time.time() - start:.0f}s")
 
