@@ -16,7 +16,7 @@ data/*
 checkpoints/
 wandb/
 plots/
-slurm/
+slurm/          # SLURM output dir; the job SCRIPTS live in scripts/slurm/
 
 results/*.log
 results/*.err
