@@ -76,6 +76,48 @@ def _coverage(args):
     return n_scaf, n_mol, generic_smiles
 
 
+def _within_bucket_variance(corpus_dir: Path, frameworks, scaffolds) -> None:
+    """The decisive check: how much property variance survives INSIDE a constraint bucket.
+
+    A constraint that many molecules share is only useful if those molecules differ in
+    the property being conditioned on. If every molecule sharing a framework had the same
+    logP, the framework would already determine it and the conditioning token would have
+    nothing left to discriminate -- the same "the condition carries no incremental
+    information" failure as the original design, arriving through a different door.
+
+    Reported as std_within / std_total. Near 1 means the constraint says almost nothing
+    about the property, so the token carries it all. Near 0 means the constraint already
+    fixes it and the token is redundant.
+    """
+    from data_pipeline.rdkit_labels import PROPERTIES
+
+    labels_path = corpus_dir / "labels.npy"
+    if not labels_path.exists():
+        print("\n  (no labels.npy -- run data_pipeline/rdkit_labels.py for the variance check)")
+        return
+    labels = np.load(labels_path)
+
+    print("\n  property variance surviving INSIDE a bucket (std_within / std_total):")
+    print(f"    {'property':<10} {'std_total':>10} {'framework':>12} {'Murcko':>12}")
+    for i, name in enumerate(PROPERTIES):
+        col = labels[:, i]
+        ok = np.isfinite(col)
+        total = float(col[ok].std())
+        row = [name, total]
+        for keys in (frameworks, scaffolds):
+            codes, _ = pd.factorize(pd.Series(keys)[ok].values)
+            df = pd.DataFrame({"k": codes, "v": col[ok]})
+            # Pooled within-bucket std: the spread left once the bucket is known.
+            g = df.groupby("k")["v"]
+            within = float(np.sqrt((g.var(ddof=0) * g.size()).sum() / max(len(df), 1)))
+            row.append(within / total if total > 0 else float("nan"))
+        print(f"    {row[0]:<10} {row[1]:>10.3f} {row[2]:>11.1%} {row[3]:>11.1%}")
+
+    print("\n    A constraint that leaves little variance has already decided the property,")
+    print("    so the conditioning token would have nothing to add -- the failure mode of")
+    print("    the original design. Above ~60% means the token does the deciding.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--corpus-dir", default="data/moses")
@@ -197,6 +239,7 @@ def main() -> None:
             big = int(c_sizes[c_sizes >= 10].sum())
             print(f"    {label:<22} {len(c_sizes):>10,} {c_sizes.mean():>8.1f} "
                   f"{np.median(c_sizes):>8.0f} {big / total:>15.1%}")
+        _within_bucket_variance(d, fws, scaffolds)
     else:
         print(f"\n  (pass --frameworks to measure framework buckets over the whole corpus;"
               f" the sample above cannot)")
