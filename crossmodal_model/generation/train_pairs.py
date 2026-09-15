@@ -1,0 +1,227 @@
+"""Train the lead-optimization generator: (M_a, delta property) -> M_b.
+
+    encoder  HybridMoLA over M_a          graph + SMILES characters
+    condition 4 delta-bin prefix tokens   logP / TPSA / QED / MW, dropped independently
+    decoder  SELFIES of M_b               causal self-attention + cross-attention
+
+The budget is set in STEPS, not epochs. The three ablation arms (graph+SMILES, graph
+only, SMILES only) run sequentially on one GPU, and an arm that trained longer because
+its epochs were cheaper would make the comparison about wall clock instead of about the
+modalities. --max-steps is therefore the contract: every arm gets the same.
+
+    python crossmodal_model/generation/train_pairs.py --max-steps 60000
+    python crossmodal_model/generation/train_pairs.py --max-steps 60000 --no-use-smiles
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+import warnings
+from pathlib import Path
+from typing import Dict, Optional
+
+warnings.filterwarnings("ignore")
+
+import torch
+import torch.nn as nn
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
+
+from common.repro import seed_everything  # noqa: E402
+from crossmodal_model.generation.conditional_decoder import ConditionalMoleculeGenerator  # noqa: E402
+from crossmodal_model.generation.pair_data import build_pair_datasets  # noqa: E402
+from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--corpus-dir", type=str, default="data/moses")
+    p.add_argument("--max-steps", type=int, default=60000,
+                   help="the budget every ablation arm gets; this is what makes them comparable")
+    p.add_argument("--batch-size", type=int, default=256)
+    p.add_argument("--eval-every", type=int, default=2000)
+    p.add_argument("--eval-batches", type=int, default=50)
+    p.add_argument("--ckpt-every-min", type=float, default=30.0)
+    p.add_argument("--hidden-dim", type=int, default=512)
+    p.add_argument("--num-layers", type=int, default=4)
+    p.add_argument("--decoder-layers", type=int, default=6)
+    p.add_argument("--num-bins", type=int, default=20)
+    p.add_argument("--cond-dropout", type=float, default=0.15)
+    p.add_argument("--max-sm-len", type=int, default=100)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--weight-decay", type=float, default=0.01)
+    p.add_argument("--warmup-steps", type=int, default=2000)
+    p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--max-pairs", type=int, default=None)
+    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--use-graph", dest="use_graph", action="store_true", default=True)
+    p.add_argument("--no-use-graph", dest="use_graph", action="store_false")
+    p.add_argument("--use-smiles", dest="use_smiles", action="store_true", default=True)
+    p.add_argument("--no-use-smiles", dest="use_smiles", action="store_false")
+    p.add_argument("--seed", type=int, default=2025)
+    p.add_argument("--rebuild-cache", action="store_true")
+    p.add_argument("--run-name", type=str, default=None)
+    p.add_argument("--out-dir", type=str, default="checkpoints/pairs")
+    p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    return p.parse_args()
+
+
+def shift_targets(tgt: torch.Tensor, start_idx: int, end_idx: int, pad_idx: int):
+    """[B, L] stored tokens -> (decoder input, decoder target), both [B, L+1].
+
+    START/END are added here rather than stored, so 1.94M cached rows do not each carry
+    two wasted slots and the special-token layout can change without re-encoding.
+    """
+    b, length = tgt.shape
+    lengths = (tgt != pad_idx).sum(dim=1)
+    dec_in = torch.full((b, length + 1), pad_idx, dtype=torch.long, device=tgt.device)
+    dec_in[:, 0] = start_idx
+    dec_in[:, 1:] = tgt
+    dec_tgt = torch.full((b, length + 1), pad_idx, dtype=torch.long, device=tgt.device)
+    dec_tgt[:, :length] = tgt
+    dec_tgt[torch.arange(b, device=tgt.device), lengths] = end_idx
+    return dec_in, dec_tgt
+
+
+def main() -> None:
+    args = parse_args()
+    seed_everything(args.seed, deterministic=False)
+    device = args.device
+    arm = ("graph+smiles" if args.use_graph and args.use_smiles
+           else "graph-only" if args.use_graph else "smiles-only")
+    run_name = args.run_name or f"pairs_{arm}_s{args.seed}"
+    out_dir = ROOT / args.out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = out_dir / f"{run_name}.pt"
+
+    if device.startswith("cuda"):
+        props = torch.cuda.get_device_properties(0)
+        print(f"GPU: {props.name} | VRAM {props.total_memory / 1e9:.0f} GB")
+
+    corpus_dir = ROOT / args.corpus_dir
+    train_ds, val_ds, _, cache, binners, vocab = build_pair_datasets(
+        corpus_dir, num_bins=args.num_bins, max_sm_len=args.max_sm_len, seed=args.seed,
+        workers=args.num_workers * 2, max_pairs=args.max_pairs, rebuild_cache=args.rebuild_cache,
+    )
+    pad_idx, start_idx, end_idx = vocab["pad_idx"], vocab["start_idx"], vocab["end_idx"]
+
+    loader_kwargs = dict(batch_size=args.batch_size, num_workers=args.num_workers,
+                         pin_memory=device.startswith("cuda"),
+                         persistent_workers=args.num_workers > 0)
+    train_loader = GeomDataLoader(train_ds, shuffle=True, drop_last=True, **loader_kwargs)
+    val_loader = GeomDataLoader(val_ds, shuffle=False, **loader_kwargs)
+
+    mola = HybridMoLA(
+        sm_vocab_size=len(cache.char_vocab), hidden_dim=args.hidden_dim, output_dim=1,
+        num_layers=args.num_layers, positional_smiles=True, max_sm_len=args.max_sm_len,
+        use_graph=args.use_graph, use_smiles=args.use_smiles,
+    )
+    model = ConditionalMoleculeGenerator(
+        mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=args.hidden_dim, pad_idx=pad_idx,
+        cond_vocab_sizes=[b.num_bins + 1 for b in binners.values()],
+        cond_null_bins=[b.null_bin for b in binners.values()],
+        cond_dropout=args.cond_dropout, decoder_layers=args.decoder_layers,
+        max_len=args.max_sm_len + 32,
+    ).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"\narm={arm}  params={n_params:,}  budget={args.max_steps:,} steps "
+          f"x batch {args.batch_size} = {args.max_steps * args.batch_size:,} examples")
+
+    criterion = nn.CrossEntropyLoss(ignore_index=pad_idx)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
+                                  fused=device.startswith("cuda"))
+
+    def lr_at(step: int) -> float:
+        if step < args.warmup_steps:
+            return args.lr * step / max(args.warmup_steps, 1)
+        progress = (step - args.warmup_steps) / max(args.max_steps - args.warmup_steps, 1)
+        return args.lr * max(0.0, 0.5 * (1.0 + torch.cos(torch.tensor(3.14159265 * progress)).item()))
+
+    use_amp = device.startswith("cuda") and torch.cuda.is_bf16_supported()
+    if use_amp:
+        print("  bf16 autocast enabled")
+
+    def batch_loss(batch) -> torch.Tensor:
+        dec_in, dec_tgt = shift_targets(batch.tgt, start_idx, end_idx, pad_idx)
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            logits = model(batch, dec_in, batch.cond)
+            return criterion(logits.reshape(-1, logits.size(-1)).float(), dec_tgt.reshape(-1))
+
+    @torch.no_grad()
+    def evaluate() -> Dict[str, float]:
+        model.eval()
+        total, n, correct, tokens = 0.0, 0, 0, 0
+        for i, batch in enumerate(val_loader):
+            if i >= args.eval_batches:
+                break
+            batch = batch.to(device, non_blocking=True)
+            dec_in, dec_tgt = shift_targets(batch.tgt, start_idx, end_idx, pad_idx)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+                logits = model(batch, dec_in, batch.cond)
+            loss = criterion(logits.reshape(-1, logits.size(-1)).float(), dec_tgt.reshape(-1))
+            keep = dec_tgt != pad_idx
+            correct += int(((logits.argmax(-1) == dec_tgt) & keep).sum())
+            tokens += int(keep.sum())
+            total += loss.item()
+            n += 1
+        model.train()
+        return {"loss": total / max(n, 1), "token_acc": correct / max(tokens, 1)}
+
+    history, step, best_val = [], 0, float("inf")
+    start = time.time()
+    last_ckpt = start
+    model.train()
+    print()
+    while step < args.max_steps:
+        for batch in train_loader:
+            if step >= args.max_steps:
+                break
+            batch = batch.to(device, non_blocking=True)
+            for g in optimizer.param_groups:
+                g["lr"] = lr_at(step)
+            loss = batch_loss(batch)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            optimizer.step()
+            step += 1
+
+            if step % args.eval_every == 0 or step == args.max_steps:
+                val = evaluate()
+                elapsed = time.time() - start
+                rate = step / max(elapsed, 1e-9)
+                eta = (args.max_steps - step) / max(rate, 1e-9)
+                print(f"step {step:>7,}/{args.max_steps:,} | train {loss.item():.4f} | "
+                      f"val {val['loss']:.4f} acc {val['token_acc']:.3f} | "
+                      f"{rate:.1f} it/s | eta {eta / 60:.0f} min", flush=True)
+                history.append({"step": step, "train_loss": loss.item(), **val})
+                best_val = min(best_val, val["loss"])
+
+            # Checkpoint on a wall-clock timer, not a step count: a job lost at hour 4
+            # to a node failure should cost thirty minutes, not the whole arm.
+            if time.time() - last_ckpt > args.ckpt_every_min * 60 or step == args.max_steps:
+                torch.save({
+                    "model_state_dict": model.state_dict(), "step": step, "args": vars(args),
+                    "arm": arm, "vocab": vocab, "char_vocab": cache.char_vocab,
+                    "binners": {k: v.state_dict() for k, v in binners.items()},
+                    "history": history,
+                }, ckpt_path)
+                last_ckpt = time.time()
+
+    elapsed = time.time() - start
+    print(f"\nDone: {step:,} steps in {elapsed / 60:.0f} min | best val loss {best_val:.4f}")
+    print(f"Checkpoint: {ckpt_path}")
+    (out_dir / f"{run_name}_history.json").write_text(
+        json.dumps({"arm": arm, "params": n_params, "elapsed_s": elapsed, "history": history}, indent=2),
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()
