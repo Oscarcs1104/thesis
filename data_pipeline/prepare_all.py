@@ -41,6 +41,11 @@ def main() -> None:
                          "classification sets. The corpus deduplication covers every split "
                          "of all three datasets, so changing this does not affect it")
     ap.add_argument("--seed", type=int, default=2025)
+    ap.add_argument("--merge-duplicates", action="store_true",
+                    help="merge molecules sharing an InChIKey and average their targets. "
+                         "Off by default: it makes a cleaner dataset and a different one, "
+                         "and these numbers are meant to be comparable with published "
+                         "MoleculeNet results measured on the raw files")
     ap.add_argument("--skip-download", action="store_true")
     ap.add_argument("--n-mad", type=float, default=5.0,
                     help="modified z-score threshold for flagging extreme targets")
@@ -63,7 +68,8 @@ def main() -> None:
         for molnet_name in _MOLNET:
             download_one(molnet_name, out_base, split=args.split, seed=args.seed,
                          force=args.force, n_mad=args.n_mad,
-                         drop_outliers=args.drop_outliers)
+                         drop_outliers=args.drop_outliers,
+                         merge_duplicates=args.merge_duplicates)
 
     print("\n== warming graph caches ==")
     for molnet_name in _MOLNET:

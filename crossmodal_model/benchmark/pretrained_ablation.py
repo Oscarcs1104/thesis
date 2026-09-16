@@ -1,6 +1,6 @@
 """Property-prediction ablation over PRETRAINED backbones, MoLA fusion, MoleculeNet.
 
-Six configurations x three datasets x N seeds -> one CSV:
+Seven configurations x three datasets x N seeds -> one CSV:
 
     chemberta        ChemBERTa alone            (3 layers, ~3.3M params)
     molformer        MoLFormer-XL alone         (12 layers, hidden 768)
@@ -8,6 +8,13 @@ Six configurations x three datasets x N seeds -> one CSV:
     chemberta+gin    both, fused by MoLA cross-layer attention
     molformer+gin    both, fused by MoLA cross-layer attention
     hybrid           the thesis's own HybridMoLA, from scratch
+    mola             the original MoLA on dc.feat.MolGraphConvFeaturizer features
+
+'mola' is the reference implementation this work is measured against, reproduced here
+rather than compared to from the outside: the same pool, the same partitioner, the same
+optimiser and schedule, so a difference between it and 'hybrid' is the architecture and
+its featurization and nothing else. It needs DeepChem installed and it cannot take
+--init-checkpoint, since the only MOSES-pretrained encoder that exists is a HybridMoLA.
 
 Featurization follows the encoder: the pretrained rows use the Hu et al. 2+2 schema
 their GIN checkpoints were trained on, 'hybrid' the OGB 9+3 schema plus character
@@ -56,6 +63,7 @@ from rdkit import RDLogger  # noqa: E402
 
 RDLogger.DisableLog("rdApp.*")
 
+from torch_geometric.data import Data  # noqa: E402
 from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
 
 from common.repro import (  # noqa: E402
@@ -79,6 +87,7 @@ from crossmodal_model.model.mola_pretrained import (  # noqa: E402
 )
 from crossmodal_model.train.core import DATASETS  # noqa: E402
 from crossmodal_model.generation.pair_data import build_char_vocab  # noqa: E402
+from crossmodal_model.model.mola import MoLA  # noqa: E402
 from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
 from data_pipeline.convert_smiles_to_pyg import smiles_to_data  # noqa: E402
 from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa: E402
@@ -86,7 +95,7 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 'hybrid' is the thesis's own encoder, trained from scratch, and the only row whose
 # checkpoint can go on to initialize the generation half: the others use the Hu et al.
 # 2+2 featurization and have no character-level SMILES branch.
-ALL_CONFIGS = tuple(CONFIGS) + ("hybrid",)
+ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola")
 
 CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
@@ -171,6 +180,88 @@ def resplit_pool(dataset: str, seed: int, strategy: str = "deepchem-random"):
     return {k: pool.iloc[v].reset_index(drop=True) for k, v in parts.items()}
 
 
+def load_split_mola(dataset: str, seed: Optional[int], strategy: str = "deepchem-random",
+                    max_sm_len: int = 100):
+    """The colleague's pipeline for the `mola` row, followed step for step.
+
+    It differs from load_split in the order of two operations, and the order matters.
+    He featurizes the whole pool with dc.feat.MolGraphConvFeaturizer, drops what the
+    featurizer refuses, and THEN partitions; we partition first and drop afterwards.
+    With one unfeaturizable molecule in ESOL that is the difference between a pool of
+    1127 and one of 1128, which shifts every index and therefore the whole partition --
+    it is why his dumped split holds 901/113/113 where ours holds 902/113/113 on the
+    same data. Reproducing his numbers means reproducing this order.
+
+    Node features are the featurizer's dense float vector, not the OGB categorical
+    columns the rest of this file uses; MoLA projects that vector with a Linear, which
+    is why its graph_dim is an integer rather than a list of vocabulary sizes.
+
+    DeepChem is imported here and nowhere else. It pulls TensorFlow in eagerly (see
+    scripts/verify_splitter.py), so it stays out of every path that does not need it.
+    """
+    try:
+        import deepchem as dc
+    except Exception as exc:  # noqa: BLE001 -- the cause matters more than the type
+        raise SystemExit(
+            f"--configs mola needs DeepChem for dc.feat.MolGraphConvFeaturizer "
+            f"({type(exc).__name__}: {exc}).\n"
+            f"  pip install deepchem tensorflow-cpu\n"
+            f"DeepChem 2.x imports TensorFlow eagerly even to reach a featurizer that "
+            f"never uses it; cpu, since nothing here touches a GPU."
+        )
+    from data_pipeline.splitters import split_dataset
+
+    cfg = DATASETS[dataset]
+    csv_dir = ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
+    pool = pd.concat([pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")],
+                     ignore_index=True)
+    smiles = pool["smiles"].astype(str).tolist()
+    targets = pool[cfg["target_col"]].astype(float).tolist()
+
+    featurizer = dc.feat.MolGraphConvFeaturizer()
+    feats = featurizer.featurize(smiles)
+    keep = [i for i, f in enumerate(feats)
+            if hasattr(f, "node_features") and hasattr(f, "edge_index")]
+    if len(keep) != len(smiles):
+        print(f"    [{dataset}] MolGraphConvFeaturizer dropped "
+              f"{len(smiles) - len(keep)}/{len(smiles)} before splitting")
+    smiles = [smiles[i] for i in keep]
+    targets = [targets[i] for i in keep]
+    feats = [feats[i] for i in keep]
+
+    if seed is None:
+        raise SystemExit("--configs mola requires --resplit-per-seed: its pool is built "
+                         "after the featurizer's filter, so the frozen split's row "
+                         "numbers do not address it.")
+    tr, va, te = split_dataset(range(len(smiles)), strategy, 0.8, 0.1, 0.1, seed,
+                               smiles_list=smiles)
+    parts = {"train": list(tr.indices), "valid": list(va.indices), "test": list(te.indices)}
+    print(f"    [{dataset} seed {seed}] repartitioned (mola pool): "
+          + " ".join(f"{k}={len(v)}" for k, v in parts.items()))
+
+    # His vocabulary is built over all three partitions. That is a transductive leak --
+    # the character set is seen on test -- but SMILES alphabets are tiny and shared, and
+    # reproducing his number means reproducing his vocabulary.
+    from crossmodal_model.data.featurize import build_vocab
+
+    vocab = build_vocab(smiles)
+
+    out = {}
+    for name, idx in parts.items():
+        items = []
+        for i in idx:
+            g = feats[i]
+            d = Data(x=torch.tensor(g.node_features, dtype=torch.float32),
+                     edge_index=torch.tensor(g.edge_index, dtype=torch.long),
+                     y=torch.tensor([targets[i]], dtype=torch.float32))
+            ids = [vocab.get(c, 0) for c in smiles[i][:max_sm_len]]
+            ids.extend([0] * (max_sm_len - len(ids)))
+            d.sm = torch.tensor(ids, dtype=torch.long).unsqueeze(0)
+            items.append(d)
+        out[name] = items
+    return out, vocab
+
+
 def load_split(dataset: str, hybrid: bool = False,
                char_vocab: Optional[Dict[str, int]] = None, max_sm_len: int = 100,
                resplit_seed: Optional[int] = None,
@@ -243,14 +334,33 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
-    splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab,
-                                    resplit_seed=seed if args.resplit_per_seed else None,
-                                    resplit_strategy=args.split_strategy)
+    is_mola = config == "mola"
+    if is_mola:
+        if init_ckpt is not None:
+            raise SystemExit("--configs mola has no MOSES-pretrained checkpoint: the one "
+                             "that exists is HybridMoLA, a different architecture and a "
+                             "different featurization. Run the mola row without "
+                             "--init-checkpoint, or pretrain MoLA first.")
+        splits, char_vocab = load_split_mola(
+            dataset, seed if args.resplit_per_seed else None, strategy=args.split_strategy)
+    else:
+        splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab,
+                                        resplit_seed=seed if args.resplit_per_seed else None,
+                                        resplit_strategy=args.split_strategy)
     train_y = torch.tensor([float(d.y) for d in splits["train"]])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
     target_std = float(train_y.std())
 
-    if is_hybrid:
+    if is_mola:
+        # graph_dim is an integer here: MolGraphConvFeaturizer emits a dense float vector
+        # per atom, which MoLA projects with a Linear, where HybridMoLA takes categorical
+        # OGB columns through an embedding table per column.
+        model = MoLA(
+            graph_dim=splits["train"][0].x.size(1),
+            sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
+            num_layers=num_layers,
+        ).to(device)
+    elif is_hybrid:
         model = HybridMoLA(
             sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
             num_layers=num_layers, positional_smiles=True, max_sm_len=100,

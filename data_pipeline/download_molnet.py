@@ -52,7 +52,8 @@ def _inchikey(smiles: str):
 
 def download_one(name: str, parent_dir: Path, split: str = "random",
                  fracs=(0.8, 0.1, 0.1), seed: int = 2025, force: bool = False,
-                 n_mad: float = 5.0, drop_outliers: bool = False) -> None:
+                 n_mad: float = 5.0, drop_outliers: bool = False,
+                 merge_duplicates: bool = False) -> None:
     remote_file, smi_col, tgt_col = DATASETS[name]
     raw_dir = parent_dir / name / "raw"
     csv_dir = parent_dir / name / "csv"
@@ -94,9 +95,26 @@ def download_one(name: str, parent_dir: Path, split: str = "random",
     df["inchikey"] = df["smiles"].map(_inchikey)
     df = df.dropna(subset=["inchikey"])
 
+    # Duplicate molecules are LEFT IN by default. MoleculeNet ships ESOL with eleven
+    # InChIKey duplicates -- the same compound written two ways, occasionally with
+    # measurements that disagree (sorbitol appears at 0.060 and 1.090). Merging them and
+    # averaging is the cleaner dataset, and it is also a different dataset: 1117 rows
+    # where every published number was measured on 1128, so the RMSE stops being
+    # comparable to the literature and to anyone else running the benchmark. Between a
+    # small memorisation effect and incomparable numbers, the benchmark wins; the
+    # duplicates are reported so the effect can be stated rather than hidden.
+    #
+    # --merge-duplicates opts into the clean version. It does NOT affect the corpus-side
+    # deduplication in data_pipeline/moses.py, which is a different thing entirely: that
+    # one keeps evaluation molecules out of the pretraining corpus, and removing it would
+    # leak the test set into the encoder rather than modify a benchmark.
     n_before = len(df)
-    df = df.groupby("inchikey", as_index=False).agg(smiles=("smiles", "first"), y=("y", "mean"))
-    n_merged = n_before - len(df)
+    n_dupes = int(n_before - df["inchikey"].nunique())
+    if merge_duplicates:
+        df = df.groupby("inchikey", as_index=False).agg(smiles=("smiles", "first"), y=("y", "mean"))
+        n_merged = n_before - len(df)
+    else:
+        n_merged = 0
     df = df.reset_index(drop=True)
 
     smiles = df["smiles"].tolist()
@@ -112,11 +130,15 @@ def download_one(name: str, parent_dir: Path, split: str = "random",
 
     (csv_dir / "split_meta.json").write_text(json.dumps({
         "split": split, "seed": seed, "fracs": list(fracs), "n_molecules": int(len(df)),
+        # Whether duplicate molecules were merged decides which benchmark this is, so it
+        # travels with the split rather than living only in someone's memory.
+        "merge_duplicates": bool(merge_duplicates), "n_duplicate_inchikeys": n_dupes,
         "sizes": {k: len(v) for k, v in parts.items()},
     }, indent=2), encoding="utf-8")
 
     print(
-        f"[{name}] {len(df)} molecules ({n_merged} dup InChIKey merged) | "
+        f"[{name}] {len(df)} molecules "
+        f"({f'{n_merged} dup InChIKey merged' if merge_duplicates else f'{n_dupes} dup InChIKey KEPT'}) | "
         f"{split} split train/valid/test = {len(parts['train'])}/{len(parts['valid'])}/{len(parts['test'])} | "
         f"y mean={df['y'].mean():.3f} std={df['y'].std():.3f} range=[{df['y'].min():.3f}, {df['y'].max():.3f}]"
     )
@@ -134,6 +156,11 @@ def main() -> None:
                          "are gone, and the numbers stop being comparable to any published "
                          "MoleculeNet result. Off by default for that reason")
     ap.add_argument("--split", default="random", choices=["random", "scaffold"])
+    ap.add_argument("--merge-duplicates", action="store_true",
+                    help="merge molecules sharing an InChIKey and average their targets. "
+                         "Cleaner, and a different dataset: ESOL becomes 1117 rows where "
+                         "every published number was measured on 1128, so the results "
+                         "stop being comparable. Off by default for that reason")
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--force", action="store_true", help="re-download even if the raw CSV is cached")
     args = ap.parse_args()
@@ -141,6 +168,7 @@ def main() -> None:
     parent = Path(args.output_dir)
     for name in args.datasets:
         download_one(name, parent, args.split, (0.8, 0.1, 0.1), args.seed, args.force,
+                     merge_duplicates=args.merge_duplicates,
                      n_mad=args.n_mad, drop_outliers=args.drop_outliers)
 
 
