@@ -13,6 +13,12 @@
 # encoders. MoLFormer (12 layers, hidden 768) costs far more wall clock per step than
 # hybrid (~4.7M-parameter encoder); that is expected, not a reason to shorten it.
 #
+# HIDDEN and LAYERS set the encoder's shape, and whatever is used here propagates:
+# the fine-tuning and generation scripts read these dimensions out of the checkpoint
+# rather than from their own defaults, because pretrained weights only fit the shape
+# they were trained in. Scaling the encoder means re-running this one step, not
+# editing three files and hoping they agree.
+#
 # Writes checkpoints/pretrain_moses/<tag>_s<seed>.pt, e.g. hybrid_graph_smiles_s2025.pt
 #
 # Defaults to ARCH=hybrid, which is the only one the current plan needs. ARCH=pretrained
@@ -69,6 +75,8 @@ esac
 python crossmodal_model/train/pretrain_moses.py \
     --arch "$ARCH" \
     --config "${CONFIG:-chemberta+gin}" \
+    --hidden-dim "${HIDDEN:-256}" \
+    --num-layers "${LAYERS:-3}" \
     --max-steps "${STEPS:-40000}" \
     --batch-size "${BATCH:-256}" \
     --lm-top-n "${LM_TOP_N:-0}" \
