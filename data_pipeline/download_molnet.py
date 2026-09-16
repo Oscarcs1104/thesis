@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from rdkit import Chem, RDLogger
 
@@ -43,7 +44,8 @@ def _inchikey(smiles: str):
 
 
 def download_one(name: str, parent_dir: Path, split: str = "scaffold",
-                 fracs=(0.8, 0.1, 0.1), seed: int = 2025, force: bool = False) -> None:
+                 fracs=(0.8, 0.1, 0.1), seed: int = 2025, force: bool = False,
+                 n_mad: float = 5.0, drop_outliers: bool = False) -> None:
     remote_file, smi_col, tgt_col = DATASETS[name]
     raw_dir = parent_dir / name / "raw"
     csv_dir = parent_dir / name / "csv"
@@ -61,6 +63,24 @@ def download_one(name: str, parent_dir: Path, split: str = "scaffold",
     df = df[[smi_col, tgt_col]].rename(columns={smi_col: "smiles", tgt_col: "y"})
     df["y"] = pd.to_numeric(df["y"], errors="coerce")
     df = df.dropna(subset=["smiles", "y"])
+
+    # Curation before anything else: a SMILES with a dot is more than one species,
+    # usually a parent plus a counterion, and the measured property belongs to the
+    # parent. See data_pipeline/curation.py for why outliers are treated differently.
+    from data_pipeline.curation import curation_summary, find_outliers, strip_fragments
+
+    cleaned, frag_report = strip_fragments(df["smiles"].astype(str).tolist())
+    df["smiles"] = cleaned
+    df = df.dropna(subset=["smiles"])
+
+    outliers = find_outliers(df["y"].to_numpy(), n_mad=n_mad)
+    print(curation_summary(frag_report, outliers, name))
+    if drop_outliers and outliers["n_outliers"]:
+        keep = np.ones(len(df), dtype=bool)
+        keep[outliers["indices"]] = False
+        df = df[keep]
+        print(f"  [{name}] --drop-outliers: removed {outliers['n_outliers']} rows. "
+              f"These numbers are NO LONGER comparable to published MoleculeNet results.")
 
     df["smiles"] = df["smiles"].map(canonicalize_smiles)
     df = df.dropna(subset=["smiles"])
@@ -89,6 +109,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-dir", default="data/deepchem_molnet")
     ap.add_argument("--datasets", nargs="*", default=list(DATASETS), choices=list(DATASETS))
+    ap.add_argument("--n-mad", type=float, default=5.0,
+                    help="modified z-score threshold for flagging extreme targets")
+    ap.add_argument("--drop-outliers", action="store_true",
+                    help="REMOVE flagged extremes instead of only reporting them. This "
+                         "changes the benchmark: RMSE falls because the hardest molecules "
+                         "are gone, and the numbers stop being comparable to any published "
+                         "MoleculeNet result. Off by default for that reason")
     ap.add_argument("--split", default="scaffold", choices=["scaffold", "random"])
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--force", action="store_true", help="re-download even if the raw CSV is cached")
@@ -96,7 +123,8 @@ def main() -> None:
 
     parent = Path(args.output_dir)
     for name in args.datasets:
-        download_one(name, parent, args.split, (0.8, 0.1, 0.1), args.seed, args.force)
+        download_one(name, parent, args.split, (0.8, 0.1, 0.1), args.seed, args.force,
+                     n_mad=args.n_mad, drop_outliers=args.drop_outliers)
 
 
 if __name__ == "__main__":

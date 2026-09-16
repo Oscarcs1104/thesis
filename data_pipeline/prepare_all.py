@@ -35,6 +35,12 @@ def main() -> None:
     ap.add_argument("--zinc-csv", default="data/zinc15_250K.csv")
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--skip-download", action="store_true")
+    ap.add_argument("--n-mad", type=float, default=5.0,
+                    help="modified z-score threshold for flagging extreme targets")
+    ap.add_argument("--drop-outliers", action="store_true",
+                    help="REMOVE flagged extremes rather than only reporting them. Doing so "
+                         "changes the benchmark and the numbers stop being comparable to "
+                         "published MoleculeNet results; off by default")
     ap.add_argument("--skip-zinc", action="store_true",
                     help="skip the ZINC15 graph cache. It fed the superseded pseudo-labelling "
                          "generator; the conditional generator pretrains on MOSES "
@@ -48,7 +54,9 @@ def main() -> None:
         from data_pipeline.download_molnet import download_one
 
         for molnet_name in _MOLNET:
-            download_one(molnet_name, out_base, split="scaffold", seed=args.seed, force=args.force)
+            download_one(molnet_name, out_base, split="scaffold", seed=args.seed,
+                         force=args.force, n_mad=args.n_mad,
+                         drop_outliers=args.drop_outliers)
 
     print("\n== warming graph caches ==")
     for molnet_name in _MOLNET:
