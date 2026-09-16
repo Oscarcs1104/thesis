@@ -590,6 +590,22 @@ def main() -> None:
         print("\nNo runs completed.")
         return
 
+    # This file is appended to, which is useful for building a table a configuration at a
+    # time and dangerous once the dataset underneath changes: rows measured over 1117 and
+    # over 1128 ESOL molecules look alike and average into a number that means nothing.
+    # Say what the file holds now, rather than leaving it to surface in a summary later.
+    try:
+        on_disk = pd.read_csv(out_path)
+        if "n_pool" in on_disk.columns and on_disk["n_pool"].nunique() > 1:
+            print(f"\nWARNING: {out_path.name} now mixes rows measured over different "
+                  f"pools. Those are different benchmarks:")
+            for (cfg, pool), n in on_disk.groupby(["config", "n_pool"]).size().items():
+                print(f"    {str(cfg):<14} pool {int(pool):>5}  {n} rows")
+            print("  summarize_results.py splits them; rows written before n_pool existed "
+                  "carry no such information and cannot be separated after the fact.")
+    except Exception:  # noqa: BLE001 -- a readback problem must not lose the results
+        pass
+
     df = pd.DataFrame(rows)
     print("\n" + "=" * 78)
     print("RMSE, mean +/- std over seeds (lower is better)")
