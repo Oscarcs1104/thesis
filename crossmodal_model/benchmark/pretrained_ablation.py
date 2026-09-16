@@ -65,7 +65,7 @@ from crossmodal_model.model.mola_pretrained import (  # noqa: E402
 from crossmodal_model.train.core import DATASETS  # noqa: E402
 from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa: E402
 
-CSV_FIELDS = ["dataset", "config", "seed", "rmse", "mae", "nrmse", "r2",
+CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
 
 
@@ -84,6 +84,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--warmup-epochs", type=int, default=5)
     p.add_argument("--gin-variant", type=str, default="contextpred")
+    p.add_argument("--init-checkpoint", type=str, default=None,
+                   help="start from a MOSES-pretrained checkpoint "
+                        "(crossmodal_model/train/pretrain_moses.py). The head is dropped: it "
+                        "predicts 4 standardized RDKit descriptors, not this dataset's target")
     p.add_argument("--freeze-lm", dest="freeze_lm", action="store_true", default=True)
     p.add_argument("--no-freeze-lm", dest="freeze_lm", action="store_false")
     p.add_argument("--freeze-gin", dest="freeze_gin", action="store_true", default=True)
@@ -124,6 +128,22 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
         config, hidden_dim=args.hidden_dim, output_dim=1, num_layers=args.num_layers,
         lm_freeze=args.freeze_lm, gin_variant=args.gin_variant, gin_freeze=args.freeze_gin,
     ).to(device)
+    if args.init_checkpoint:
+        ckpt = torch.load(args.init_checkpoint, map_location="cpu", weights_only=False)
+        if ckpt.get("config") != config:
+            raise SystemExit(
+                f"--init-checkpoint was pretrained as {ckpt.get('config')!r} but this row is "
+                f"{config!r}. Loading across configurations would mix backbones silently."
+            )
+        state = {k: v for k, v in ckpt["model_state_dict"].items() if not k.startswith("head.")}
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        real_missing = [k for k in missing if not k.startswith("head.")]
+        if real_missing or unexpected:
+            raise SystemExit("pretrained init did not load cleanly\n"
+                             f"  missing:    {real_missing}\n"
+                             f"  unexpected: {list(unexpected)}")
+        print(f"  initialized from {args.init_checkpoint} (step {ckpt.get('step')}), head reset")
+
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -230,6 +250,7 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
     test = run("test", False)
     return {
         "dataset": dataset, "config": config, "seed": seed,
+        "pretrained": bool(args.init_checkpoint),
         "rmse": test["rmse"], "mae": test["mae"], "nrmse": test["nrmse"], "r2": test["r2"],
         "best_epoch": best_epoch, "n_params": n_params, "n_trainable": n_trainable,
         "elapsed_s": time.time() - start,

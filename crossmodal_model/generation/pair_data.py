@@ -40,7 +40,15 @@ from common.property_bins import PropertyBinner
 from data_pipeline.features import ATOM_FEATURE_DIMS, BOND_FEATURE_DIMS
 from data_pipeline.rdkit_labels import PROPERTIES
 
-CACHE_NAME = "molecule_graph_cache.npz"
+# One cache per featurization schema. They are not interchangeable: "ogb" is the 9+3
+# schema data_pipeline/features.py defines, "pretrain-gnn" the 2+2 schema the Hu et al.
+# checkpoints were trained on. Mixing them would feed pretrained embeddings indices that
+# mean something else, which raises no error and simply produces nonsense.
+SCHEMAS = ("ogb", "pretrain-gnn")
+
+
+def cache_name(schema: str) -> str:
+    return f"molecule_graph_cache_{schema}.npz"
 
 
 def build_char_vocab(smiles: Sequence[str]) -> Dict[str, int]:
@@ -54,9 +62,10 @@ def build_char_vocab(smiles: Sequence[str]) -> Dict[str, int]:
 _WORKER: dict = {}
 
 
-def _init_worker(char_vocab: Dict[str, int], max_sm_len: int) -> None:
+def _init_worker(char_vocab: Dict[str, int], max_sm_len: int, schema: str) -> None:
     _WORKER["char_vocab"] = char_vocab
     _WORKER["max_sm_len"] = max_sm_len
+    _WORKER["schema"] = schema
     from rdkit import RDLogger
 
     RDLogger.DisableLog("rdApp.*")
@@ -64,9 +73,12 @@ def _init_worker(char_vocab: Dict[str, int], max_sm_len: int) -> None:
 
 def _featurize_one(smiles: str):
     """(x, edge_index, edge_attr, sm) as small numpy arrays, or None if RDKit refuses."""
-    from data_pipeline.convert_smiles_to_pyg import smiles_to_data
+    if _WORKER["schema"] == "pretrain-gnn":
+        from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain as featurize
+    else:
+        from data_pipeline.convert_smiles_to_pyg import smiles_to_data as featurize
 
-    d = smiles_to_data(smiles)
+    d = featurize(smiles)
     if d is None:
         return None
     vocab, max_len = _WORKER["char_vocab"], _WORKER["max_sm_len"]
@@ -84,7 +96,9 @@ def _featurize_one(smiles: str):
 class MoleculeGraphCache:
     """Flat per-atom / per-edge arrays plus offsets. Assembles a Data object on demand."""
 
-    def __init__(self, arrays: Dict[str, np.ndarray], char_vocab: Dict[str, int]) -> None:
+    def __init__(self, arrays: Dict[str, np.ndarray], char_vocab: Dict[str, int],
+                 schema: str = "ogb") -> None:
+        self.schema = schema
         self.x = arrays["x"]
         self.edge_index = arrays["edge_index"]
         self.edge_attr = arrays["edge_attr"]
@@ -111,23 +125,27 @@ class MoleculeGraphCache:
         np.savez_compressed(
             path, x=self.x, edge_index=self.edge_index, edge_attr=self.edge_attr,
             sm=self.sm, atom_ptr=self.atom_ptr, edge_ptr=self.edge_ptr,
-            valid=self.valid, char_vocab=json.dumps(self.char_vocab),
+            valid=self.valid, char_vocab=json.dumps(self.char_vocab), schema=self.schema,
         )
 
     @classmethod
     def load(cls, path: Path) -> "MoleculeGraphCache":
         z = np.load(path, allow_pickle=False)
         arrays = {k: z[k] for k in ("x", "edge_index", "edge_attr", "sm", "atom_ptr", "edge_ptr", "valid")}
-        return cls(arrays, json.loads(str(z["char_vocab"])))
+        schema = str(z["schema"]) if "schema" in z else "ogb"
+        return cls(arrays, json.loads(str(z["char_vocab"])), schema=schema)
 
     @classmethod
     def build(cls, smiles: Sequence[str], char_vocab: Dict[str, int], max_sm_len: int = 100,
-              workers: int = 8, chunksize: int = 2000) -> "MoleculeGraphCache":
+              workers: int = 8, chunksize: int = 2000, schema: str = "ogb") -> "MoleculeGraphCache":
+        if schema not in SCHEMAS:
+            raise ValueError(f"schema must be one of {SCHEMAS}, got {schema!r}")
         n = len(smiles)
-        print(f"Featurizing {n:,} molecules on {workers} workers...")
+        print(f"Featurizing {n:,} molecules ({schema} schema) on {workers} workers...")
         start = time.time()
         results: List[Optional[tuple]] = []
-        with mp.Pool(workers, initializer=_init_worker, initargs=(char_vocab, max_sm_len)) as pool:
+        with mp.Pool(workers, initializer=_init_worker,
+                     initargs=(char_vocab, max_sm_len, schema)) as pool:
             for i, r in enumerate(pool.imap(_featurize_one, smiles, chunksize=chunksize), 1):
                 results.append(r)
                 if i % 250_000 == 0:
@@ -139,9 +157,11 @@ class MoleculeGraphCache:
         atom_ptr = np.concatenate([[0], np.cumsum(n_atoms)])
         edge_ptr = np.concatenate([[0], np.cumsum(n_edges)])
 
-        x = np.zeros((int(atom_ptr[-1]), len(ATOM_FEATURE_DIMS)), dtype=np.int8)
+        n_atom_cols = 2 if schema == "pretrain-gnn" else len(ATOM_FEATURE_DIMS)
+        n_bond_cols = 2 if schema == "pretrain-gnn" else len(BOND_FEATURE_DIMS)
+        x = np.zeros((int(atom_ptr[-1]), n_atom_cols), dtype=np.int8)
         edge_index = np.zeros((2, int(edge_ptr[-1])), dtype=np.int16)
-        edge_attr = np.zeros((int(edge_ptr[-1]), len(BOND_FEATURE_DIMS)), dtype=np.int8)
+        edge_attr = np.zeros((int(edge_ptr[-1]), n_bond_cols), dtype=np.int8)
         sm = np.zeros((n, max_sm_len), dtype=np.int16)
         for i, r in enumerate(results):
             if r is None:
@@ -155,7 +175,8 @@ class MoleculeGraphCache:
         print(f"  cache: {int(valid.sum()):,} molecules, {total_mb:.0f} MB in RAM "
               f"({time.time() - start:.0f}s)")
         return cls({"x": x, "edge_index": edge_index, "edge_attr": edge_attr, "sm": sm,
-                    "atom_ptr": atom_ptr, "edge_ptr": edge_ptr, "valid": valid}, char_vocab)
+                    "atom_ptr": atom_ptr, "edge_ptr": edge_ptr, "valid": valid},
+                   char_vocab, schema=schema)
 
 
 class PairDataset(GeomDataset):
@@ -202,12 +223,13 @@ def build_pair_datasets(
     vocab["id_to_token"] = {int(k): v for k, v in vocab["id_to_token"].items()}
     smiles = corpus["smiles"].astype(str).tolist()
 
-    cache_path = corpus_dir / CACHE_NAME
+    cache_path = corpus_dir / cache_name("ogb")
     if cache_path.exists() and not rebuild_cache:
         cache = MoleculeGraphCache.load(cache_path)
         print(f"Loaded graph cache from {cache_path} ({len(cache):,} molecules)")
     else:
-        cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles), max_sm_len, workers)
+        cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles), max_sm_len,
+                                         workers, schema="ogb")
         cache.save(cache_path)
         print(f"Saved graph cache to {cache_path}")
 
@@ -261,4 +283,5 @@ def build_pair_datasets(
     return out["train"], out["val"], out["test"], cache, binners, vocab
 
 
-__all__ = ["MoleculeGraphCache", "PairDataset", "build_pair_datasets", "build_char_vocab"]
+__all__ = ["MoleculeGraphCache", "PairDataset", "build_pair_datasets", "build_char_vocab",
+           "cache_name", "SCHEMAS"]
