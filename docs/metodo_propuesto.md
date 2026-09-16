@@ -75,7 +75,37 @@ A diferencia de la rama anterior, el acolchado y las posiciones resultan aquí o
 un encoder de caracteres invariante a permutación y diluido por padding no puede sostener
 generación coherente.
 
-#### 1.2.3 Fusión entre capas (MoLA)
+#### 1.2.3 Equiparación de capacidad entre las dos ramas
+
+Una ablación de modalidades solo mide modalidades si las ramas tienen capacidad comparable.
+No era el caso en la configuración por defecto. `nn.TransformerEncoderLayer` fija
+`dim_feedforward = 2048` sin escalarlo con `d_model`, de modo que con un ancho oculto de 256
+la rama de SMILES aplicaba una expansión de 8× en su bloque *feedforward*, mientras que el
+MLP de actualización del GINEConv era `hidden → hidden`, expansión de 1×. El resultado:
+
+| Rama | Parámetros (3 capas, ancho 256) |
+|---|---:|
+| SMILES | 3 945 216 |
+| Grafo | 450 816 |
+
+Un factor de **8,75×**. Bajo esa configuración, «solo SMILES supera a solo grafo» sería una
+afirmación sobre capacidad, no sobre modalidad, y el brazo fusionado concentraría el 96 % de
+sus parámetros en una sola rama, lo que impediría separar «la fusión aporta» de «una de las
+dos ramas es mucho mayor».
+
+Se introduce por ello un multiplicador de anchura interna en el MLP del GINEConv,
+`hidden → 8·hidden → hidden`, que le da a la rama de grafo el mismo bloque *feedforward* que
+la de SMILES. La razón cae a **1,23×**. Lo que resta es el bloque de atención, cuya
+contrapartida en la rama de grafo es el paso de mensajes y no parámetros; no es un desajuste
+que más anchura corrija, y forzar la igualdad exacta exigiría un multiplicador elegido para
+cuadrar una cifra en lugar de por una razón arquitectónica.
+
+El multiplicador viaja dentro del *checkpoint* junto al ancho oculto y el número de capas: los
+pesos preentrenados solo encajan en la forma en que fueron entrenados, y tanto el ajuste fino
+como el entrenamiento del generador lo leen de ahí en lugar de sus propios valores por
+defecto. Una discrepancia falla al cargar los pesos con un error de forma.
+
+#### 1.2.4 Fusión entre capas (MoLA)
 
 La fusión no combina únicamente la salida final de cada rama. Cada capa de cada modalidad
 aporta un token; todos se apilan y se someten a *self-attention* con 8 cabezas, y el
@@ -224,32 +254,42 @@ y no se almacenan.
 
 #### 2.1.3 Control de fuga hacia los conjuntos de evaluación
 
-Toda molécula del corpus cuyo InChIKey coincida con una del *split de test* de ESOL,
-FreeSolv o Lipophilicity se elimina. Se usa InChIKey y no SMILES crudo para que una escritura
-distinta de la misma molécula también se detecte.
+Toda molécula del corpus cuyo InChIKey coincida con una de ESOL, FreeSolv o Lipophilicity se
+elimina. Se usa InChIKey y no SMILES crudo para que una escritura distinta de la misma
+molécula también se detecte.
 
-| Conjunto | Moléculas en test | Eliminadas del corpus |
+La exclusión cubre los **tres splits** de los tres conjuntos, no solo el de test. Restringirla
+al test bastaría para la evaluación, pero ataría el corpus a una partición concreta: al
+cambiar la semilla o el criterio de partición, moléculas que antes estaban en entrenamiento
+pasarían a test y el corpus habría que reconstruirlo. Cubriendo los tres splits, la partición
+y el corpus dejan de depender el uno del otro.
+
+| Conjunto | Moléculas (los tres splits) | Eliminadas del corpus |
 |---|---:|---:|
-| ESOL | 112 | 11 |
-| FreeSolv | 65 | 0 |
-| Lipophilicity | 420 | 27 |
-| **Total (InChIKeys únicos)** | **591** | **38** |
+| ESOL | 1 117 | 37 |
+| FreeSolv | 642 | 0 |
+| Lipophilicity | 4 200 | 169 |
+| **Total (InChIKeys únicos)** | **5 564** | **196** |
 
-La fila de total cuenta **InChIKeys únicos**, no la suma de las tres filas: 597 − 591 = 6
-moléculas figuran en el conjunto de test de más de un dataset, y basta una coincidencia para
-excluirlas del corpus. La columna de eliminadas sí es aditiva.
+La fila de total cuenta **InChIKeys únicos**, no la suma de las tres filas: 5 959 − 5 564 =
+395 moléculas figuran en más de un dataset, y basta una coincidencia para excluirlas del
+corpus. La columna de eliminadas sí es aditiva.
+
+El solape es del **3,5 %** de las 5 564 moléculas de evaluación. MOSES y estos tres conjuntos
+son poblaciones casi disjuntas, de modo que la fuga entre las dos mitades del trabajo era
+pequeña incluso antes de este filtro; eliminarla, aun así, cuesta 196 moléculas de 1,94 M.
 
 El patrón es químicamente coherente: FreeSolv son disolventes pequeños y no se solapa con un
 corpus drug-like, mientras que Lipophilicity procede de ChEMBL y aporta la mayoría de las
 coincidencias.
 
-El solape de *scaffolds*, en cambio, se mide y se reporta, pero **no** se elimina: 184
-esqueletos de Murcko compartidos, que cubren 72 092 moléculas del corpus (**3,72 %**).
+El solape de *scaffolds*, en cambio, se mide y se reporta, pero **no** se elimina: 728
+esqueletos de Murcko compartidos, que cubren 304 951 moléculas del corpus (**15,7 %**).
 Eliminar todo scaffold compartido arrancaría quimiotipos completos de un corpus drug-like, y
 ningún protocolo publicado de preentrenamiento lo hace; el número queda constando para que
 el lector juzgue su alcance.
 
-Tras estos filtros el corpus queda en **1 936 539 moléculas**.
+Tras estos filtros el corpus queda en **1 936 381 moléculas**.
 
 ### 2.2 Etiquetado con oráculo exacto
 
@@ -338,15 +378,33 @@ experimentales. Se emplean tres conjuntos de regresión de MoleculeNet:
 
 | Conjunto | Propiedad | Moléculas | Test |
 |---|---|---:|---:|
-| ESOL (Delaney) | solubilidad acuosa, log mol/L | ≈ 1 120 | 112 |
-| FreeSolv (SAMPL) | energía libre de hidratación, kcal/mol | ≈ 650 | 65 |
-| Lipophilicity | logD a pH 7,4 | ≈ 4 200 | 420 |
+| ESOL (Delaney) | solubilidad acuosa, log mol/L | 1 117 | 113 |
+| FreeSolv (SAMPL) | energía libre de hidratación, kcal/mol | 642 | 65 |
+| Lipophilicity | logD a pH 7,4 | 4 200 | 420 |
 
 Los CSV se descargan del repositorio público de MoleculeNet, se canonicalizan, se deduplican
 por InChIKey —promediando el valor cuando dos entradas son la misma molécula— y se parten con
-un **split por scaffold de Murcko fijo** (80/10/10, semilla 2025). El split se congela en
-disco y lo comparten todas las configuraciones y semillas, de modo que ninguna diferencia
-entre filas de la tabla de resultados pueda atribuirse a una partición distinta.
+un **split aleatorio fijo** (80/10/10, semilla 2025).
+
+La elección de partición aleatoria, y no por scaffold, sigue la recomendación del propio
+artículo de MoleculeNet para estos tres conjuntos: son tareas de fisicoquímica, donde la
+propiedad depende de la composición atómica y de descriptores globales más que del esqueleto,
+y es el protocolo bajo el que se publicaron las cifras con las que estos resultados se
+comparan. La partición por scaffold es la convención de MoleculeNet para sus conjuntos de
+clasificación biológica, donde el esqueleto sí determina la actividad. Usar scaffold aquí
+daría números más bajos que no serían comparables con la literatura y que medirían una
+dificultad distinta de la que el conjunto plantea.
+
+El split se congela en disco junto a un `split_meta.json` que registra el criterio, la semilla
+y los tamaños, y lo comparten todas las configuraciones y semillas, de modo que ninguna
+diferencia entre filas de la tabla de resultados pueda atribuirse a una partición distinta.
+
+> **Nota · dos particiones distintas en un mismo trabajo.** La partición aleatoria de §2.4 y
+> la partición por scaffold de los pares (§2.5) responden a preguntas distintas y conviven sin
+> contradicción. En §2.4 se mide la capacidad de predecir una propiedad fisicoquímica y la
+> referencia publicada es aleatoria. En §2.5 lo que se mide es la generación de un análogo, y
+> ahí el scaffold es exactamente lo que el modelo podría memorizar: un par cuyo origen esté en
+> entrenamiento y cuyo destino esté en test mediría memorización, no generalización.
 
 ### 2.5 Partición de los pares
 
@@ -476,6 +534,16 @@ El presupuesto se fija en **pasos**, no en épocas, tanto en el preentrenamiento
 en el decoder (§3.3). Los brazos se ejecutan secuencialmente sobre una única GPU, y un brazo
 que entrenara más tiempo por tener épocas más baratas convertiría la comparación en una sobre
 tiempo de reloj en lugar de sobre las modalidades.
+
+Por el mismo motivo las dos ramas se equiparan en parámetros (§1.2.3): igualar el presupuesto
+de pasos y dejar que una rama tenga 8,75× los parámetros de la otra sería controlar una
+variable de confusión y no la otra.
+
+A estos tres brazos se añade una cuarta corrida que repite **grafo + SMILES** partiendo del
+encoder preentrenado sobre MOSES. No es un cuarto brazo de modalidad, sino el segundo eje del
+diseño: los brazos 1 a 3 responden *¿aporta la fusión multimodal?* y la comparación entre el
+brazo 1 y esta cuarta corrida responde *¿aporta el preentrenamiento?*. El brazo fusionado es
+el pivote de ambos ejes, y por eso son cuatro corridas y no seis.
 
 ### 3.5 Diagnósticos de uso de la condición
 
