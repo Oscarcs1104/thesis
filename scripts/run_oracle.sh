@@ -36,6 +36,26 @@ print(f"{torch.cuda.get_device_name(0)} | torch {torch.__version__}")
 print("GPU kernels OK")
 PY
 
+# Who else is on this GPU. There is no scheduler here to queue behind, so starting on
+# top of someone else's job means both of you competing for VRAM and, likely, both
+# getting an OOM. This only reports -- it is not this script's place to refuse -- but
+# it reports before the hours-long part rather than after.
+if command -v nvidia-smi > /dev/null; then
+  echo "--- GPU ahora mismo ---"
+  nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu \
+             --format=csv,noheader 2>/dev/null || true
+  OTHERS=$(nvidia-smi --query-compute-apps=pid,used_memory,process_name \
+                      --format=csv,noheader 2>/dev/null | grep -v "^$" || true)
+  if [[ -n "$OTHERS" ]]; then
+    echo "procesos en la GPU:"
+    echo "$OTHERS" | sed 's/^/  /'
+    echo "  (si alguno no es tuyo, considera esperar: aqui no hay cola)"
+  else
+    echo "  libre"
+  fi
+  echo "-----------------------"
+fi
+
 if [[ $# -gt 0 ]]; then
   CKPTS=("$@")
 else
