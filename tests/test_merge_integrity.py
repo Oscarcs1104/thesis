@@ -233,3 +233,55 @@ def test_run_name_separates_runs_that_differ_in_any_reported_axis():
             f"run_name does not depend on args.{axis}, so two runs differing only in it "
             f"overwrite each other's checkpoint. It is built from: {sorted(used)}"
         )
+
+
+def test_modality_branches_are_capacity_comparable():
+    """The two encoder branches must hold comparable parameter counts.
+
+    Otherwise the modality ablation does not measure what it claims. With
+    nn.TransformerEncoderLayer's default dim_feedforward=2048 against hidden_dim=256 and
+    a GIN update MLP of hidden->hidden, the SMILES branch held 3,945,216 parameters
+    against the graph branch's 450,816 -- 8.75x. "SMILES alone beats graph alone" would
+    then have been a statement about capacity, and the fused arm would already carry 96%
+    of its parameters in one modality.
+
+    Built from nn.Linear and nn.TransformerEncoderLayer rather than by instantiating the
+    encoders, so this runs without torch_geometric.
+    """
+    import torch.nn as nn
+
+    hidden, layers, mult = 256, 3, 8
+
+    def count(m):
+        return sum(p.numel() for p in m.parameters())
+
+    smiles = layers * count(nn.TransformerEncoderLayer(d_model=hidden, nhead=8, batch_first=True))
+    gin_mlp = nn.Sequential(
+        nn.Linear(hidden, hidden * mult), nn.BatchNorm1d(hidden * mult), nn.ReLU(),
+        nn.Linear(hidden * mult, hidden),
+    )
+    graph = layers * (count(gin_mlp) + 1)          # +1 for GINEConv's trainable eps
+
+    ratio = smiles / graph
+    assert ratio < 1.5, (
+        f"the SMILES branch is {ratio:.2f}x the graph branch ({smiles:,} vs {graph:,}). "
+        f"The ablation would compare capacities rather than modalities."
+    )
+
+    # And the default really is 8 where it matters, since the test above only proves the
+    # arithmetic works for a multiplier nobody is obliged to pass.
+    import ast
+
+    for rel in ("crossmodal_model/train/pretrain_moses.py",
+                "crossmodal_model/generation/train_pairs.py",
+                "crossmodal_model/benchmark/pretrained_ablation.py"):
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        defaults = [
+            kw.value.value
+            for node in ast.walk(tree) if isinstance(node, ast.Call)
+            for a in node.args[:1]
+            if isinstance(a, ast.Constant) and a.value == "--gin-hidden-mult"
+            for kw in node.keywords
+            if kw.arg == "default" and isinstance(kw.value, ast.Constant)
+        ]
+        assert defaults == [mult], f"{rel} defaults --gin-hidden-mult to {defaults}, expected [{mult}]"

@@ -132,6 +132,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ckpt-every-min", type=float, default=30.0)
     p.add_argument("--hidden-dim", type=int, default=256)
     p.add_argument("--num-layers", type=int, default=3)
+    p.add_argument("--gin-hidden-mult", type=int, default=8,
+                   help="widens the GIN update MLP's inner layer to hidden_dim * this. 8 matches "
+                        "the SMILES branch's feedforward block, which defaults to "
+                        "dim_feedforward=2048 against hidden 256. At 1 the graph branch "
+                        "holds 450,816 parameters against the SMILES branch's 3,945,216, "
+                        "so the modality ablation compares capacities, not modalities")
     p.add_argument("--lr", type=float, default=1e-4,
                    help="low by default: this fine-tunes pretrained backbones, and the "
                         "usual 1e-3 would wash out what they already know in the warmup")
@@ -249,6 +255,7 @@ def main() -> None:
             output_dim=len(PROPERTIES), num_layers=args.num_layers,
             positional_smiles=True, max_sm_len=cache.sm.shape[1],
             use_graph=args.use_graph, use_smiles=args.use_smiles,
+            gin_hidden_mult=args.gin_hidden_mult,
         ).to(device)
         print(f"  arch=hybrid ({tag}), everything from scratch")
     else:
@@ -348,6 +355,10 @@ def main() -> None:
                     "model_state_dict": model.state_dict(), "config": args.config,
                     "arch": args.arch, "char_vocab": cache.char_vocab, "schema": schema,
                     "use_graph": args.use_graph, "use_smiles": args.use_smiles,
+                    # Explicit alongside args so anything rebuilding this encoder gets
+                    # the same shape. A mismatch is a load-time shape error, which is
+                    # the right failure, but only if the value travels with the weights.
+                    "gin_hidden_mult": args.gin_hidden_mult,
                     "step": step, "args": vars(args), "history": history,
                     # Needed by the fine-tune: without them the pretrained head predicts
                     # in standardized space and its outputs are meaningless.

@@ -54,8 +54,19 @@ def _load_text_tokenizer(model_name: str, trust_remote_code: bool):
         return PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, **special_tokens)
 
 
-def _make_graph_conv(backbone: str, hidden_dim: int) -> Tuple[nn.Module, bool]:
-    """Returns (conv, consumes_edge_features). All convs are hidden->hidden."""
+def _make_graph_conv(backbone: str, hidden_dim: int,
+                     gin_hidden_mult: int = 1) -> Tuple[nn.Module, bool]:
+    """Returns (conv, consumes_edge_features). All convs are hidden->hidden.
+
+    gin_hidden_mult widens the GIN update MLP's inner layer. It exists because the
+    modality ablation was not capacity-matched: nn.TransformerEncoderLayer defaults to
+    dim_feedforward=2048, which against hidden_dim=256 is an 8x expansion, while the GIN
+    MLP was hidden->hidden. The SMILES branch carried 3,945,216 parameters against the
+    graph branch's 450,816, so "SMILES alone beats graph alone" would have been a
+    statement about 8.75x the capacity rather than about the modality. mult=8 gives the
+    two branches the same feedforward block; what remains is the attention block, whose
+    counterpart in the graph branch is message passing rather than parameters.
+    """
     backbone = backbone.lower()
     if backbone == "gcn":
         return GCNConv(hidden_dim, hidden_dim), False
@@ -64,11 +75,12 @@ def _make_graph_conv(backbone: str, hidden_dim: int) -> Tuple[nn.Module, bool]:
     if backbone == "gatv2":
         return GATv2Conv(hidden_dim, hidden_dim, heads=4, concat=False, edge_dim=hidden_dim), True
     if backbone == "gin":
+        inner = hidden_dim * gin_hidden_mult
         mlp = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.Linear(hidden_dim, inner),
+            nn.BatchNorm1d(inner),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(inner, hidden_dim),
         )
         return GINEConv(mlp, train_eps=True), True  # edge_dim=None -> expects edge feats already at hidden_dim
     raise ValueError(f"Unsupported graph backbone: {backbone}")
@@ -91,6 +103,7 @@ class GraphEncoder(nn.Module):
         num_layers: int = 3,
         dropout: float = 0.3,
         pool: str = "add",
+        gin_hidden_mult: int = 1,
         **_ignored: Any,  # absorbs removed node_encoding / node_vocab_sizes / edge_vocab_sizes kwargs
     ) -> None:
         super().__init__()
@@ -101,6 +114,7 @@ class GraphEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.graph_backbone = graph_backbone
+        self.gin_hidden_mult = gin_hidden_mult
         self.edge_aware = graph_backbone in _EDGE_AWARE_BACKBONES
         self.dropout = nn.Dropout(dropout)
 
@@ -108,7 +122,7 @@ class GraphEncoder(nn.Module):
         self.graph_layers = nn.ModuleList()
         self.bond_encoders = nn.ModuleList()
         for _ in range(num_layers):
-            conv, uses_edges = _make_graph_conv(graph_backbone, hidden_dim)
+            conv, uses_edges = _make_graph_conv(graph_backbone, hidden_dim, gin_hidden_mult)
             self.graph_layers.append(conv)
             self.bond_encoders.append(BondEncoder(hidden_dim) if uses_edges else nn.Identity())
 

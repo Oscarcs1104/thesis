@@ -25,6 +25,7 @@ class HybridMoLA(nn.Module):
         graph_dropout: float = 0.3,
         use_graph: bool = True,
         use_smiles: bool = True,
+        gin_hidden_mult: int = 1,
     ) -> None:
         super().__init__()
         self.encoder = HybridEncoder(
@@ -41,6 +42,7 @@ class HybridMoLA(nn.Module):
             graph_dropout=graph_dropout,
             use_graph=use_graph,
             use_smiles=use_smiles,
+            gin_hidden_mult=gin_hidden_mult,
         )
         self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
         self.out_layer_final = nn.Sequential(

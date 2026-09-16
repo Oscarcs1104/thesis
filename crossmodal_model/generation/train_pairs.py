@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
                    help="encoder+decoder width. Overridden by --init-encoder, which "
                         "must use whatever shape the checkpoint was trained in")
     p.add_argument("--num-layers", type=int, default=3)
+    p.add_argument("--gin-hidden-mult", type=int, default=8,
+                   help="widens the GIN update MLP's inner layer to hidden_dim * this. 8 matches "
+                        "the SMILES branch's feedforward block, which defaults to "
+                        "dim_feedforward=2048 against hidden 256. At 1 the graph branch "
+                        "holds 450,816 parameters against the SMILES branch's 3,945,216, "
+                        "so the modality ablation compares capacities, not modalities")
     p.add_argument("--decoder-layers", type=int, default=6)
     p.add_argument("--num-bins", type=int, default=20)
     p.add_argument("--cond-dropout", type=float, default=0.15)
@@ -152,6 +158,7 @@ def main() -> None:
     # pretrained weights only fit the shape they were trained in, and a mismatch here
     # fails at load time with a shape error rather than anywhere informative.
     hidden_dim, num_layers = args.hidden_dim, args.num_layers
+    gin_mult = args.gin_hidden_mult
     ck = None
     if args.init_encoder:
         ck = torch.load(args.init_encoder, map_location="cpu", weights_only=False)
@@ -161,12 +168,16 @@ def main() -> None:
         if (ck_hidden, ck_layers) != (hidden_dim, num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim} -> {ck_hidden}, "
                   f"layers {num_layers} -> {ck_layers}")
-        hidden_dim, num_layers = ck_hidden, ck_layers
+        ck_mult = int(ck.get("gin_hidden_mult", ck_args.get("gin_hidden_mult", 1)))
+        if ck_mult != gin_mult:
+            print(f"  GIN width multiplier taken from the checkpoint: {gin_mult} -> {ck_mult}")
+        hidden_dim, num_layers, gin_mult = ck_hidden, ck_layers, ck_mult
 
     mola = HybridMoLA(
         sm_vocab_size=len(cache.char_vocab), hidden_dim=hidden_dim, output_dim=1,
         num_layers=num_layers, positional_smiles=True, max_sm_len=args.max_sm_len,
         use_graph=args.use_graph, use_smiles=args.use_smiles,
+        gin_hidden_mult=gin_mult,
     )
     model = ConditionalMoleculeGenerator(
         mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=hidden_dim, pad_idx=pad_idx,
@@ -288,6 +299,7 @@ def main() -> None:
                     # keeps the command line's value: anything rebuilding the model from
                     # args alone would get the wrong width and fail at load.
                     "hidden_dim": hidden_dim, "num_layers": num_layers,
+                    "gin_hidden_mult": gin_mult,
                     "arm": arm, "vocab": vocab, "char_vocab": cache.char_vocab,
                     "binners": {k: v.state_dict() for k, v in binners.items()},
                     "history": history,

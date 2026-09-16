@@ -34,6 +34,7 @@ class HybridEncoder(nn.Module):
         graph_dropout: float = 0.3,
         use_graph: bool = True,
         use_smiles: bool = True,
+        gin_hidden_mult: int = 1,
     ) -> None:
         super().__init__()
         if not use_graph and not use_smiles:
@@ -55,6 +56,7 @@ class HybridEncoder(nn.Module):
                 node_vocab_sizes=node_vocab_sizes,
                 edge_vocab_sizes=edge_vocab_sizes,
                 pool=graph_pooling,
+                gin_hidden_mult=gin_hidden_mult,
             )
 
         if use_smiles:

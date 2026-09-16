@@ -102,6 +102,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--hidden-dim", type=int, default=256)
     p.add_argument("--num-layers", type=int, default=3)
+    p.add_argument("--gin-hidden-mult", type=int, default=8,
+                   help="GIN MLP inner width as a multiple of hidden_dim. Matches the "
+                        "SMILES branch's feedforward block so the modality ablation "
+                        "compares modalities rather than capacities. Overridden by "
+                        "--init-checkpoint, which fixes the shape")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--grad-clip", type=float, default=1.0)
@@ -180,10 +185,14 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
     # Same rule as the generator: the encoder's shape is whatever the checkpoint was
     # trained in, never this script's default.
     hidden_dim, num_layers = args.hidden_dim, args.num_layers
+    gin_mult = args.gin_hidden_mult
     if init_ckpt is not None:
         ck_args = init_ckpt.get("args", {})
         hidden_dim = int(ck_args.get("hidden_dim", hidden_dim))
         num_layers = int(ck_args.get("num_layers", num_layers))
+        # Same reason as hidden/layers: the pretrained weights only fit the shape they
+        # were trained in, and the GIN MLP width is part of that shape.
+        gin_mult = int(init_ckpt.get("gin_hidden_mult", ck_args.get("gin_hidden_mult", gin_mult)))
         if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
@@ -196,6 +205,7 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         model = HybridMoLA(
             sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
             num_layers=num_layers, positional_smiles=True, max_sm_len=100,
+            gin_hidden_mult=gin_mult,
         ).to(device)
     else:
         model = build_config(
