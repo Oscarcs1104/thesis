@@ -91,14 +91,47 @@ def main() -> None:
         smiles = pool["smiles"].astype(str).tolist()
         targets = pool[target_col].astype(float).tolist()
 
-        feats = dc.feat.MolGraphConvFeaturizer().featurize(smiles)
-        keep = [i for i, f in enumerate(feats)
-                if hasattr(f, "node_features") and hasattr(f, "edge_index")]
-        if len(keep) != len(smiles):
-            print(f"[{name}] featurizer dropped {len(smiles) - len(keep)}/{len(smiles)}")
+        # One molecule at a time, not the whole list. featurize() returns a ragged list
+        # when any datapoint fails -- a GraphData for the good ones, an empty array for
+        # the rest -- and its closing np.asarray() raises on that under modern numpy,
+        # where older versions quietly built an object array. The reference code's
+        # `hasattr(x, "node_features")` filter is written for that object array, so it
+        # was running against a numpy old enough to produce one.
+        #
+        # What fails is real chemistry, not a corner case to route around: methane is a
+        # single atom with no bonds, so edge_index is empty and the featurizer reduces
+        # over it. That one molecule is what takes ESOL from 1128 to 1127 and shifts
+        # every partition index after it.
+        featurizer = dc.feat.MolGraphConvFeaturizer()
+        feats, keep, failed = [], [], []
+        for i, smi in enumerate(smiles):
+            try:
+                out = featurizer.featurize([smi])
+                g = out[0] if len(out) else None
+            except Exception:  # noqa: BLE001 -- any failure is a drop, the reason varies
+                g = None
+            usable = (
+                g is not None
+                and hasattr(g, "node_features")
+                and hasattr(g, "edge_index")
+                # An empty edge_index is the methane case: the object exists, and every
+                # downstream reduction over it fails. Checked here rather than left to
+                # surface as a shape error inside a training loop.
+                and np.asarray(g.node_features).size
+                and np.asarray(g.edge_index).size
+            )
+            if usable:
+                feats.append(g)
+                keep.append(i)
+            else:
+                failed.append((i, smi))
+        if failed:
+            shown = ", ".join(f"{i}:{smi}" for i, smi in failed[:5])
+            more = f" (+{len(failed) - 5} more)" if len(failed) > 5 else ""
+            print(f"[{name}] featurizer dropped {len(failed)}/{len(smiles)}: {shown}{more}")
 
-        nodes = [np.asarray(feats[i].node_features, dtype=np.float32) for i in keep]
-        edges = [np.asarray(feats[i].edge_index, dtype=np.int32) for i in keep]
+        nodes = [np.asarray(g.node_features, dtype=np.float32) for g in feats]
+        edges = [np.asarray(g.edge_index, dtype=np.int32) for g in feats]
         node_ptr = np.concatenate([[0], np.cumsum([n.shape[0] for n in nodes])]).astype(np.int64)
         edge_ptr = np.concatenate([[0], np.cumsum([e.shape[1] for e in edges])]).astype(np.int64)
 
