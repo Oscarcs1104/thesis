@@ -173,7 +173,8 @@ def resplit_pool(dataset: str, seed: int, strategy: str = "deepchem-random"):
 
 def load_split(dataset: str, hybrid: bool = False,
                char_vocab: Optional[Dict[str, int]] = None, max_sm_len: int = 100,
-               resplit_seed: Optional[int] = None):
+               resplit_seed: Optional[int] = None,
+               resplit_strategy: str = "deepchem-random"):
     """Featurize a dataset's split, frozen on disk or repartitioned for this seed.
 
     The schema follows the encoder: 'hybrid' consumes OGB 9+3 plus character indices for

@@ -285,3 +285,48 @@ def test_modality_branches_are_capacity_comparable():
             if kw.arg == "default" and isinstance(kw.value, ast.Constant)
         ]
         assert defaults == [mult], f"{rel} defaults --gin-hidden-mult to {defaults}, expected [{mult}]"
+
+
+def test_keyword_arguments_match_the_signatures_in_the_same_module():
+    """No call may pass a keyword the function it names does not accept.
+
+    Python only finds this when the line runs, which for a training script is after the
+    data has loaded. It cost a full ablation launch: load_split gained a resplit_strategy
+    argument at its call site and not in its definition, and eighteen runs failed one by
+    one with the same TypeError.
+
+    Only calls to plain names defined in the same module are checked, so an attribute
+    call or an imported function is out of scope; a function taking **kwargs accepts
+    anything and is skipped.
+    """
+    import ast
+
+    sources = sorted(
+        p for d in ("crossmodal_model", "data_pipeline", "common", "scripts")
+        for p in (ROOT / d).rglob("*.py")
+    )
+
+    offenders = []
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        sigs = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                a = node.args
+                if a.kwarg is not None:                       # **kwargs takes anything
+                    continue
+                sigs[node.name] = {p.arg for p in a.args + a.posonlyargs + a.kwonlyargs}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            allowed = sigs.get(node.func.id)
+            if allowed is None:
+                continue
+            for kw in node.keywords:
+                if kw.arg is not None and kw.arg not in allowed:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno} {node.func.id}(..., {kw.arg}=) "
+                        f"-- accepts {sorted(allowed)}"
+                    )
+
+    assert not offenders, "calls passing keywords their function does not accept:\n  " + "\n  ".join(offenders)
