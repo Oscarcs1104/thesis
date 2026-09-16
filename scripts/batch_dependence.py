@@ -74,8 +74,12 @@ def score(model, dataset, batch_size, device, standardizer, shuffle_seed=None):
     preds, targets = [], []
     for batch in loader:
         batch = batch.to(device)
-        out = model(batch)[3].view(-1)
-        preds.append(standardizer.inverse_transform(out).cpu())
+        # Kept two-dimensional through the standardizer: its mean_ and std_ are [1, D],
+        # so a [B] tensor broadcasts to [1, B] instead of staying [B]. Every batch then
+        # comes back transposed, which only shows up when the last batch is a different
+        # size from the rest -- torch.cat succeeds silently whenever they all match.
+        out = model(batch)[3].view(-1, 1)
+        preds.append(standardizer.inverse_transform(out).view(-1).cpu())
         targets.append(batch.y.view(-1).cpu())
     return regression_metrics(torch.cat(preds), torch.cat(targets))["rmse"]
 
