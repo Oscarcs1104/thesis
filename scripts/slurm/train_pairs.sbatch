@@ -15,6 +15,9 @@
 # that trained longer because its epochs were cheaper would make the comparison about
 # wall clock rather than about the modalities.
 #
+# Rough cost: ~2-3 hours for 60k steps at hidden 512 with a 6-layer decoder, plus ~10
+# minutes for the cache on the first run. The live eta at each eval is the real number.
+#
 # The first run featurizes 1.94M molecules into the OGB graph cache (~1.4 GB, written to
 # data/moses/). Later runs and the other arms load it in seconds.
 #
@@ -26,7 +29,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=08:00:00
+#SBATCH --time=05:00:00
 #SBATCH --output=results/logs/pairs_%j.out
 #SBATCH --error=results/logs/pairs_%j.err
 

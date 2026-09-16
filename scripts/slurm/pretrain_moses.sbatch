@@ -15,6 +15,15 @@
 #
 # Writes checkpoints/pretrain_moses/<tag>_s<seed>.pt, e.g. hybrid_graph_smiles_s2025.pt
 #
+# Defaults to ARCH=hybrid, which is the only one the current plan needs. ARCH=pretrained
+# with CONFIG=chemberta+gin / molformer+gin still works, but MoLFormer is 12 layers at
+# hidden 768 and wants three to four hours plus --time raised; opt in deliberately.
+#
+# Rough cost for hybrid at 40k steps: about an hour, plus ~10 minutes to build the graph
+# cache once. That is an estimate -- the script prints it/s and a live eta at every eval,
+# so the first one gives you the real number. Raise it with sbatch --time=... rather than
+# editing: over-asking delays the scheduler even though the job frees the GPU when done.
+#
 # First run featurizes 1.94M molecules into the graph cache for its schema, once.
 # mkdir -p results/logs before the first submit -- SLURM opens the log files first.
 
@@ -24,7 +33,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=10:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=results/logs/pretrain_%j.out
 #SBATCH --error=results/logs/pretrain_%j.err
 

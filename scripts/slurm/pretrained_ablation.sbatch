@@ -12,14 +12,12 @@
 # INIT must match CONFIGS: a checkpoint pretrained as one configuration is refused for
 # another rather than loaded partially.
 #
-# Frozen backbones are precomputed once per split, so the epochs afterwards are a small
-# fusion module over cached tensors -- about a minute per cell. `hybrid` trains end to
-# end and has nothing to cache, so it is slower per cell.
+# hybrid trains end to end, so nothing is cached: roughly a few minutes per cell, well
+# under an hour for 3 datasets x 3 seeds. The pretrained-backbone rows instead
+# precompute their frozen features once per split and take about a minute per cell.
 #
 # Time one cell before committing to the grid:
-#   DATASETS=esol CONFIGS=gin SEEDS=2025 sbatch scripts/slurm/pretrained_ablation.sbatch
-#
-# First run downloads the GIN checkpoint (7.5 MB) and the HF backbones (~1 GB).
+#   DATASETS=esol SEEDS=2025 sbatch scripts/slurm/pretrained_ablation.sbatch
 # mkdir -p results/logs before the first submit -- SLURM opens the log files first.
 
 #SBATCH --job-name=thesis-finetune
@@ -28,7 +26,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=03:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=results/logs/finetune_%j.out
 #SBATCH --error=results/logs/finetune_%j.err
 
@@ -50,7 +48,7 @@ fi
 
 python crossmodal_model/benchmark/pretrained_ablation.py \
     --datasets ${DATASETS:-esol freesolv lipo} \
-    --configs ${CONFIGS:-chemberta molformer gin chemberta+gin molformer+gin hybrid} \
+    --configs ${CONFIGS:-hybrid} \
     --seeds ${SEEDS:-2025 2026 2027} \
     --out "${OUT:-results/pretrained_ablation.csv}" \
     $INIT_FLAG
