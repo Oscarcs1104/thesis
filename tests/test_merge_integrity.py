@@ -190,3 +190,46 @@ def test_dataset_attributes_do_not_shadow_pyg():
         "these attributes shadow a PyG Dataset method and will break at DataLoader "
         f"construction: {offenders}"
     )
+
+
+def test_run_name_separates_runs_that_differ_in_any_reported_axis():
+    """Two runs that the thesis compares must not resolve to the same checkpoint path.
+
+    This is not hypothetical either. run_name encoded only the modality arm and the
+    seed, so the graph+smiles arm trained from scratch and the same arm trained from the
+    MOSES-pretrained encoder -- the two halves of the "does pretraining help" comparison
+    -- both wrote checkpoints/pairs/pairs_graph+smiles_s2025.pt. They ran sequentially on
+    the single GPU, so the second silently destroyed the first, checkpoint and history
+    alike, and it was only noticed because the file count did not match the job count.
+
+    The rule: every argument the ablation varies has to appear in the name.
+    """
+    import ast
+
+    path = ROOT / "crossmodal_model" / "generation" / "train_pairs.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    main = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    # Collect the names run_name is built from, following one level of local aliasing
+    # (init_tag = ... then f"...{init_tag}...") so the test reads intent, not spelling.
+    assigns = {t.id: n.value
+               for n in ast.walk(main) if isinstance(n, ast.Assign)
+               for t in n.targets if isinstance(t, ast.Name)}
+    assert "run_name" in assigns, "train_pairs.main no longer assigns run_name"
+
+    def referenced(node, depth=2):
+        names = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Attribute) and getattr(sub.value, "id", "") == "args":
+                names.add(sub.attr)
+            elif isinstance(sub, ast.Name) and depth and sub.id in assigns:
+                names |= referenced(assigns[sub.id], depth - 1)
+        return names
+
+    used = referenced(assigns["run_name"])
+    for axis in ("use_graph", "use_smiles", "init_encoder", "seed"):
+        assert axis in used, (
+            f"run_name does not depend on args.{axis}, so two runs differing only in it "
+            f"overwrite each other's checkpoint. It is built from: {sorted(used)}"
+        )

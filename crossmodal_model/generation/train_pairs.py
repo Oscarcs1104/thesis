@@ -113,10 +113,19 @@ def main() -> None:
     device = args.device
     arm = ("graph+smiles" if args.use_graph and args.use_smiles
            else "graph-only" if args.use_graph else "smiles-only")
-    run_name = args.run_name or f"pairs_{arm}_s{args.seed}"
+    # The init state is part of the identity, not a detail: the same arm trained from
+    # scratch and from a pretrained encoder are two different models answering two
+    # different questions, and naming them alike has the second silently overwrite the
+    # first. The "+" is dropped for the same reason as in pretrain_moses.py -- a plus
+    # sign in a path that travels through shell variables is an avoidable hazard.
+    init_tag = "pretrained" if args.init_encoder else "scratch"
+    run_name = args.run_name or f"pairs_{arm.replace('+', '_')}_{init_tag}_s{args.seed}"
     out_dir = ROOT / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = out_dir / f"{run_name}.pt"
+    if ckpt_path.exists():
+        print(f"NOTE: {ckpt_path.name} already exists and will be overwritten. "
+              f"Pass --run-name to keep both.")
 
     # Grouped by ablation arm so the three show up on one chart, which is the figure.
     run = wandb_init(args, config=vars(args), name=run_name, group="pairs-ablation",
