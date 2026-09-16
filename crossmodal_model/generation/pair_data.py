@@ -51,6 +51,27 @@ def cache_name(schema: str) -> str:
     return f"molecule_graph_cache_{schema}.npz"
 
 
+def corpus_fingerprint(smiles: Sequence[str]) -> str:
+    """Identity of the molecule list a cache was built from.
+
+    The cache is addressed by schema alone, so rebuilding the corpus leaves a file
+    whose row i is a different molecule than corpus.csv row i. Nothing downstream
+    notices: pairs.npy indexes the new corpus, cache.get() answers from the old one,
+    and training proceeds on graphs that do not match their labels. Only a corpus that
+    grew would raise, and the dedup change made it shrink.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(str(len(smiles)).encode())
+    for s in smiles:
+        # Length-prefixed rather than separated by a delimiter: no separator can
+        # appear inside a SMILES, so two different lists cannot collide.
+        h.update(str(len(s)).encode())
+        h.update(s.encode("utf-8"))
+    return h.hexdigest()
+
+
 def build_char_vocab(smiles: Sequence[str]) -> Dict[str, int]:
     """Character vocabulary for the encoder's SMILES branch; index 0 is padding."""
     chars = sorted({c for s in smiles for c in s})
@@ -97,8 +118,9 @@ class MoleculeGraphCache:
     """Flat per-atom / per-edge arrays plus offsets. Assembles a Data object on demand."""
 
     def __init__(self, arrays: Dict[str, np.ndarray], char_vocab: Dict[str, int],
-                 schema: str = "ogb") -> None:
+                 schema: str = "ogb", fingerprint: str = "") -> None:
         self.schema = schema
+        self.fingerprint = fingerprint
         self.x = arrays["x"]
         self.edge_index = arrays["edge_index"]
         self.edge_attr = arrays["edge_attr"]
@@ -126,6 +148,7 @@ class MoleculeGraphCache:
             path, x=self.x, edge_index=self.edge_index, edge_attr=self.edge_attr,
             sm=self.sm, atom_ptr=self.atom_ptr, edge_ptr=self.edge_ptr,
             valid=self.valid, char_vocab=json.dumps(self.char_vocab), schema=self.schema,
+            fingerprint=self.fingerprint,
         )
 
     @classmethod
@@ -133,7 +156,11 @@ class MoleculeGraphCache:
         z = np.load(path, allow_pickle=False)
         arrays = {k: z[k] for k in ("x", "edge_index", "edge_attr", "sm", "atom_ptr", "edge_ptr", "valid")}
         schema = str(z["schema"]) if "schema" in z else "ogb"
-        return cls(arrays, json.loads(str(z["char_vocab"])), schema=schema)
+        # "" for a cache written before fingerprints existed -- treated as unknown, which
+        # the caller resolves by rebuilding rather than by trusting it.
+        fingerprint = str(z["fingerprint"]) if "fingerprint" in z else ""
+        return cls(arrays, json.loads(str(z["char_vocab"])), schema=schema,
+                   fingerprint=fingerprint)
 
     @classmethod
     def build(cls, smiles: Sequence[str], char_vocab: Dict[str, int], max_sm_len: int = 100,
@@ -176,7 +203,49 @@ class MoleculeGraphCache:
               f"({time.time() - start:.0f}s)")
         return cls({"x": x, "edge_index": edge_index, "edge_attr": edge_attr, "sm": sm,
                     "atom_ptr": atom_ptr, "edge_ptr": edge_ptr, "valid": valid},
-                   char_vocab, schema=schema)
+                   char_vocab, schema=schema, fingerprint=corpus_fingerprint(smiles))
+
+
+def load_or_build_cache(corpus_dir: Path, smiles: Sequence[str], schema: str = "ogb",
+                        max_sm_len: int = 100, workers: int = 8, rebuild: bool = False,
+                        save: bool = True) -> "MoleculeGraphCache":
+    """The cache for this corpus, rebuilt if the file on disk belongs to another one.
+
+    Rebuilding rather than aborting is deliberate: a corpus rebuild is a normal step,
+    it costs about ten minutes here, and the alternative is training on graphs that
+    belong to different molecules than their labels do.
+
+    save=False for a truncated corpus (--limit), whose cache is valid but is not the
+    one the shared path names; writing it there would make the next full run silently
+    refeaturize, or worse, leave a smoke test's 5k molecules where 1.94M belong.
+    """
+    cache_path = Path(corpus_dir) / cache_name(schema)
+    want = corpus_fingerprint(smiles)
+    cache = None
+    if cache_path.exists() and not rebuild:
+        cache = MoleculeGraphCache.load(cache_path)
+        if cache.schema != schema:
+            print(f"Graph cache at {cache_path} uses the {cache.schema!r} schema, "
+                  f"{schema!r} was asked for. Rebuilding.")
+            cache = None
+        elif cache.fingerprint != want:
+            why = ("predates fingerprints" if not cache.fingerprint
+                   else f"is {cache.fingerprint[:12]}")
+            print(f"Graph cache does not match corpus.csv (cache fingerprint {why}, "
+                  f"corpus is {want[:12]}; {len(cache):,} vs {len(smiles):,} molecules). "
+                  f"Rebuilding.")
+            cache = None
+        else:
+            print(f"Loaded graph cache from {cache_path} ({len(cache):,} molecules)")
+    if cache is None:
+        cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles), max_sm_len,
+                                         workers, schema=schema)
+        if save:
+            cache.save(cache_path)
+            print(f"Saved graph cache to {cache_path}")
+        else:
+            print(f"Not writing {cache_path.name}: this cache covers a subset of the corpus")
+    return cache
 
 
 class PairDataset(GeomDataset):
@@ -235,15 +304,8 @@ def build_pair_datasets(
             f"{len(corpus):,}. The pair file is from a different corpus build."
         )
 
-    cache_path = corpus_dir / cache_name("ogb")
-    if cache_path.exists() and not rebuild_cache:
-        cache = MoleculeGraphCache.load(cache_path)
-        print(f"Loaded graph cache from {cache_path} ({len(cache):,} molecules)")
-    else:
-        cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles), max_sm_len,
-                                         workers, schema="ogb")
-        cache.save(cache_path)
-        print(f"Saved graph cache to {cache_path}")
+    cache = load_or_build_cache(corpus_dir, smiles, schema="ogb", max_sm_len=max_sm_len,
+                                workers=workers, rebuild=rebuild_cache)
 
     if max_pairs and len(pairs) > max_pairs:
         rng = np.random.default_rng(seed)
@@ -296,4 +358,4 @@ def build_pair_datasets(
 
 
 __all__ = ["MoleculeGraphCache", "PairDataset", "build_pair_datasets", "build_char_vocab",
-           "cache_name", "SCHEMAS"]
+           "cache_name", "corpus_fingerprint", "load_or_build_cache", "SCHEMAS"]

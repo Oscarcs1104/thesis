@@ -57,7 +57,9 @@ from common.wandb_utils import (  # noqa: E402
     wandb_log,
     wandb_summary,
 )
-from crossmodal_model.generation.pair_data import MoleculeGraphCache, build_char_vocab, cache_name  # noqa: E402
+from crossmodal_model.generation.pair_data import (  # noqa: E402
+    MoleculeGraphCache, build_char_vocab, cache_name, load_or_build_cache,
+)
 from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
 from crossmodal_model.model.mola_pretrained import CONFIGS, build_config  # noqa: E402
 from data_pipeline.rdkit_labels import PROPERTIES  # noqa: E402
@@ -211,18 +213,9 @@ def main() -> None:
     # The Hu et al. schema, kept in its own cache file: it is not interchangeable with
     # the OGB one the generation half uses.
     schema = "ogb" if args.arch == "hybrid" else "pretrain-gnn"
-    cache_path = corpus_dir / cache_name(schema)
-    if cache_path.exists() and not args.rebuild_cache:
-        cache = MoleculeGraphCache.load(cache_path)
-        print(f"Loaded graph cache from {cache_path} ({len(cache):,} molecules)")
-    else:
-        cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles),
-                                         workers=args.num_workers * 2, schema=schema)
-        cache.save(cache_path)
-        print(f"Saved graph cache to {cache_path}")
-    if cache.schema != schema:
-        raise SystemExit(f"cache at {cache_path} uses the {cache.schema!r} schema but "
-                         f"--arch {args.arch} needs {schema!r}. Pass --rebuild-cache.")
+    cache = load_or_build_cache(corpus_dir, smiles, schema=schema,
+                                workers=args.num_workers * 2, rebuild=args.rebuild_cache,
+                                save=not args.limit)
 
     assert_corpus_consistent(**{"corpus.csv": corpus, "labels.npy": labels,
                                 "graph cache": cache})
