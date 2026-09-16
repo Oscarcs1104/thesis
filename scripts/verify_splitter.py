@@ -41,9 +41,19 @@ def main() -> None:
         print("Could not import DeepChem, so nothing was verified.")
         print(f"  {type(exc).__name__}: {exc}\n")
         traceback.print_exc()
-        print("\nIf it is genuinely absent:  pip install deepchem")
-        print("If it is present but its import chain breaks, the missing piece is named")
-        print("above -- often a backend DeepChem imports eagerly.")
+        missing = getattr(exc, "name", "") or ""
+        if missing.startswith("tensorflow"):
+            # The predictable one: DeepChem 2.x imports TensorFlow eagerly through
+            # deepchem.trans.transformers, even though the splitter is plain numpy.
+            print("\nDeepChem 2.x imports TensorFlow eagerly (deepchem.trans.transformers),")
+            print("so it is needed to reach a splitter that never uses it:")
+            print("  pip install tensorflow-cpu")
+            print("cpu, not the full package: nothing here touches a GPU, and it saves")
+            print("some 400 MB of CUDA wheels.")
+        else:
+            print("\nIf it is genuinely absent:  pip install deepchem")
+            print("If it is present but its import chain breaks, the missing piece is")
+            print("named above -- often a backend DeepChem imports eagerly.")
         print("\nUntil this runs, say the partitions follow the same procedure -- not")
         print("that they are identical.")
         raise SystemExit(2)
