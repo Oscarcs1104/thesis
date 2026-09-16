@@ -1,6 +1,6 @@
 # Método propuesto
 
-> **Estado:** borrador técnico completo, prosa sin pulir.
+> **Estado:** borrador técnico completo, prosa revisada.
 > **Destinatario:** tribunal y revisores de la memoria de tesis.
 > **Todas las cifras proceden de ejecuciones reales del pipeline sobre MOSES completo.**
 > No inventar, redondear ni sustituir ningún número de este documento.
@@ -11,13 +11,13 @@
 
 La hipótesis de trabajo es que una representación molecular que combina el grafo y la
 cadena SMILES describe una molécula mejor que cualquiera de las dos modalidades por
-separado. La contribución no es una arquitectura nueva sino la comprobación de esa
+separado. La contribución no es una arquitectura nueva, sino la comprobación de esa
 hipótesis **en dos tareas distintas con un único eje de ablación**: leyendo moléculas
 (regresión de propiedades) y escribiéndolas (generación condicionada).
 
-El eje es siempre el mismo — activar o desactivar cada rama del encoder — de modo que las
-dos mitades del trabajo responden a la misma pregunta con evidencia independiente. Se
-replica el hallazgo en dos condiciones en lugar de apoyarlo en un único experimento.
+Ese eje no cambia entre tareas —activar o desactivar cada rama del encoder—, de manera que
+las dos mitades del trabajo responden a la misma pregunta con evidencia independiente. El
+hallazgo se replica en dos condiciones en lugar de descansar sobre un único experimento.
 
 ```
                     ┌─ etapa 1 ── preentrenamiento supervisado (MOSES, 1,94 M)
@@ -27,8 +27,12 @@ replica el hallazgo en dos condiciones en lugar de apoyarlo en un único experim
                     └─ etapa 3 ── decoder SELFIES ── generación condicionada
 ```
 
-El mismo checkpoint de la etapa 1 alimenta las etapas 2 y 3. Es la única forma de que las
-dos mitades compartan pesos y no solo arquitectura.
+Un único checkpoint del preentrenamiento alimenta tanto el fine-tuning como el decoder. Es
+la única forma de que las dos mitades compartan pesos, y no solo arquitectura.
+
+Las secciones que siguen recorren el pipeline en ese orden: corpus, etiquetas y pares de
+entrenamiento; arquitectura y preentrenamiento del encoder; y las dos tareas sobre las que
+se mide.
 
 ---
 
@@ -41,10 +45,10 @@ resultados generativos frente a la literatura.
 
 ### 2.1 Canonicalización y codificación
 
-Cada SMILES se procesa con RDKit en cuatro pasos: se parsea a molécula, se recanonicaliza
-(`Chem.MolToSmiles`), se calcula su InChIKey como identificador estructural, y se
-convierte a **SELFIES** mediante `selfies.encoder`. Las moléculas que RDKit rechaza, o que
-SELFIES no puede representar, se descartan.
+Cada SMILES atraviesa cuatro pasos en RDKit: se parsea a molécula, se recanonicaliza
+(`Chem.MolToSmiles`), se calcula su InChIKey como identificador estructural y se convierte
+a **SELFIES** mediante `selfies.encoder`. Las moléculas que RDKit rechaza, o que SELFIES no
+puede representar, se descartan.
 
 La elección de SELFIES como espacio de salida del decoder es deliberada: `selfies.decoder`
 no puede producir un SMILES inválido a partir de una cadena bien formada, de modo que la
@@ -82,13 +86,14 @@ escritura distinta de la misma molécula también se detecte.
 | **Total** | **591** | **38** |
 
 El patrón es químicamente coherente: FreeSolv son disolventes pequeños y no se solapa con
-un corpus drug-like; Lipophilicity procede de ChEMBL y aporta la mayoría de las
-coincidencias.
+un corpus drug-like, mientras que Lipophilicity procede de ChEMBL y aporta la mayoría de
+las coincidencias.
 
-El solape de *scaffolds* se mide y se reporta pero **no** se elimina: 184 esqueletos de
+El solape de *scaffolds* se mide y se reporta, pero **no** se elimina: 184 esqueletos de
 Murcko compartidos, que cubren 72 092 moléculas del corpus (**3,72 %**). Eliminar todo
-scaffold compartido arrancaría quimiotipos completos de un corpus drug-like y ningún
-protocolo publicado de preentrenamiento lo hace; el número queda constando.
+scaffold compartido arrancaría quimiotipos completos de un corpus drug-like, y ningún
+protocolo publicado de preentrenamiento lo hace; el número queda constando para que el
+lector juzgue su alcance.
 
 Tras estos filtros el corpus queda en **1 936 539 moléculas**.
 
@@ -96,7 +101,8 @@ Tras estos filtros el corpus queda en **1 936 539 moléculas**.
 
 ## 3. Etiquetado con oráculo exacto (etapa 1b)
 
-Para cada molécula se calculan cuatro descriptores con RDKit:
+Depurado el corpus, falta dotarlo de señal supervisada. Para cada molécula se calculan
+cuatro descriptores con RDKit:
 
 | Propiedad | Función | Interpretación |
 |---|---|---|
@@ -111,13 +117,14 @@ estructura. De ahí se derivan tres propiedades metodológicas que el diseño ex
 - **No hay ruido de etiqueta**, a diferencia de una medida experimental.
 - **No hay techo impuesto por un maestro**, a diferencia de pseudo-etiquetar con un
   predictor entrenado.
-- **La evaluación no es circular**: en la etapa 3 se pide un objetivo y se mide lo obtenido
-  con la misma función, sin ningún predictor aprendido en el bucle.
+- **La evaluación no es circular**: en la generación condicionada se pide un objetivo y se
+  mide lo obtenido con la misma función, sin ningún predictor aprendido en el bucle.
 
-La alineación con las tareas finales no es accidental. El logP de Crippen es el término
-dominante de la ecuación de Delaney para solubilidad acuosa (ESOL), y el logD 7.4 de
-Lipophilicity es logP corregido por ionización. El preentrenamiento no resuelve una tarea
-auxiliar arbitraria sino una versión exacta y abundante de la tarea de destino.
+La alineación con las tareas finales tampoco es accidental. El logP de Crippen es el
+término dominante de la ecuación de Delaney para solubilidad acuosa (ESOL), y el logD 7.4
+de Lipophilicity es logP corregido por ionización. El preentrenamiento no resuelve, por
+tanto, una tarea auxiliar arbitraria, sino una versión exacta y abundante de la tarea de
+destino.
 
 Las moléculas cuyo cálculo falla se conservan con etiqueta `NaN` en lugar de eliminarse,
 para que la fila *i* de la matriz de etiquetas siga correspondiendo a la fila *i* del
@@ -134,8 +141,8 @@ el problema central del diseño previo.
 
 Un generador condicionado que se entrena sobre `(M → M, y = f(M))` tiene la molécula
 objetivo dentro del propio *memory* del decoder. Reproducirla no requiere leer el token de
-condición, luego `H(objetivo | memory) = 0` antes siquiera de mirarlo, y el gradiente no
-tiene motivo para enseñar al decoder a usarlo. El condicionamiento resultante es nominal.
+condición: `H(objetivo | memory) = 0` antes siquiera de mirarlo, y el gradiente no tiene
+motivo para enseñar al decoder a usarlo. El condicionamiento resultante es nominal.
 
 La solución es que la molécula objetivo **no** sea la de entrada:
 
@@ -146,11 +153,12 @@ objetivo del decoder M_b   Fc1ccccc1    fluorobenceno   logP 2,27
 ```
 
 M_b no está en el *memory*. La única indicación de que hay que sustituir el cloro por
-flúor, y no por bromo, es el Δ. El gradiente queda obligado a usarlo.
+flúor, y no por bromo, es el Δ, con lo que el gradiente queda obligado a usarlo.
 
-Además desaparece el desajuste entre entrenamiento e inferencia. Con condicionamiento
-absoluto se pedía `y = y_real ± 1σ`, una combinación que jamás aparece en los datos; con un
-Δ relativo, pedir `Δ = −1` en inferencia es exactamente lo que el modelo vio miles de veces.
+Este planteamiento elimina además el desajuste entre entrenamiento e inferencia. Con
+condicionamiento absoluto se pedía `y = y_real ± 1σ`, una combinación que jamás aparece en
+los datos; con un Δ relativo, pedir `Δ = −1` en inferencia es exactamente lo que el modelo
+vio miles de veces.
 
 ### 4.2 Procedimiento
 
@@ -163,13 +171,13 @@ absoluto se pedía `y = y_real ± 1σ`, una combinación que jamás aparece en l
    poblado que esté un scaffold. Los grupos de más de 5 000 miembros se parten en bloques
    para equilibrar la carga.
 3. **Banda de similitud.** Se aceptan pares con Tanimoto sobre huellas ECFP4 en
-   `[0,50 , 0,95]`. Por debajo de 0,50 no es una modificación sino otra molécula, y el
-   encoder no puede ayudar; por encima de 0,95 es una copia y no enseña nada.
+   `[0,50 , 0,95]`. Por debajo de 0,50 no hay una modificación sino otra molécula, y el
+   encoder no puede ayudar; por encima de 0,95 hay una copia, que no enseña nada.
 4. **Preferencia por el análogo más lejano.** Cuando hay más candidatos admisibles que el
    tope de 10 por molécula, se retienen los *menos* similares: son los que conllevan el
    mayor cambio estructural y, por tanto, el mayor Δ que la condición debe explicar.
 5. **Ambas direcciones.** De cada par hallado se emiten `(a, b)` y `(b, a)`. El Δ es una
-   magnitud con signo; entrenar en una sola dirección sesgaría cada token de condición
+   magnitud con signo, y entrenar en una sola dirección sesgaría cada token de condición
    hacia un signo.
 6. **Pares identidad.** Un 5 % de los ejemplos son `(M, M)` con Δ = 0. Fijan la semántica
    de «no cambies nada» y proporcionan una prueba de sanidad en evaluación: pedir Δ = 0
@@ -211,9 +219,9 @@ por átomo** y **3 por enlace**, cada una un índice a su propio `nn.Embedding`.
 | Enlace | `bond_type`, `stereo`, `is_conjugated` |
 
 La alternativa habitual —un vector denso de reales— trataría el número atómico como
-magnitud continua, haciendo que el modelo herede la relación «el carbono está numéricamente
+magnitud continua y haría que el modelo heredara la relación «el carbono está numéricamente
 cerca del nitrógeno y lejos del azufre», que no significa nada químicamente. Con embeddings
-por columna, el modelo sitúa cada tipo donde le resulte útil.
+por columna, en cambio, el modelo sitúa cada tipo donde le resulte útil.
 
 Sobre esa representación operan capas **GINEConv**, variante de *Graph Isomorphism Network*
 que incorpora características de arista: cada capa suma el embedding del enlace al mensaje
@@ -223,10 +231,10 @@ por defecto), que produce un vector por grafo **en cada capa**.
 
 ### 5.2 Rama de SMILES
 
-La cadena SMILES se tokeniza a nivel de carácter, se acolcha a 100 posiciones y se suma un
-*positional embedding*. Cada capa es un `TransformerEncoderLayer` con 8 cabezas y máscara
-de acolchado. El estado se reduce a un vector por molécula mediante media enmascarada sobre
-los caracteres reales.
+La cadena SMILES se tokeniza a nivel de carácter, se acolcha a 100 posiciones y se le suma
+un *positional embedding*. Cada capa es un `TransformerEncoderLayer` con 8 cabezas y
+máscara de acolchado. El estado se reduce a un vector por molécula mediante media
+enmascarada sobre los caracteres reales.
 
 El acolchado y las posiciones son obligatorios aquí: un encoder de caracteres invariante a
 permutación y diluido por padding no puede sostener generación coherente.
@@ -234,7 +242,7 @@ permutación y diluido por padding no puede sostener generación coherente.
 ### 5.3 Fusión entre capas (MoLA)
 
 La fusión no combina únicamente la salida final de cada rama. Cada capa de cada modalidad
-aporta un token, todos se apilan y se someten a *self-attention* con 8 cabezas, y el
+aporta un token; todos se apilan y se someten a *self-attention* con 8 cabezas, y el
 resultado se reduce con una suma ponderada por pesos aprendidos, uno por token.
 
 ```
@@ -250,7 +258,7 @@ lugar de aportar ceros que se seguirían contando y entrenando.
 La premisa de esta fusión no es solo que capas distintas codifiquen información distinta,
 sino que **el objetivo de entrenamiento las moldea** para que así sea. Esa segunda mitad de
 la premisa exige que las ramas se entrenen conjuntamente con la fusión, y es la razón por
-la que el preentrenamiento de la etapa siguiente no congela nada.
+la que el preentrenamiento descrito a continuación no congela nada.
 
 ---
 
@@ -258,11 +266,11 @@ la que el preentrenamiento de la etapa siguiente no congela nada.
 
 El encoder se entrena sobre el corpus completo con una cabeza de regresión multitarea que
 predice las cuatro etiquetas de RDKit simultáneamente. El interés no está en esos cuatro
-valores sino en la representación que el encoder desarrolla al producirlos.
+valores, sino en la representación que el encoder desarrolla al producirlos.
 
 ### 6.1 Estandarización de objetivos
 
-Las cuatro propiedades se estandarizan con la media y desviación del conjunto de
+Las cuatro propiedades se estandarizan con la media y la desviación del conjunto de
 entrenamiento. Sin ello, un error cuadrático medio sin ponderar estaría dominado por el
 peso molecular —desviación típica cercana a 28— frente al QED —cercana a 0,1—, y el modelo
 resultante sería un regresor de MW con tres adornos. El RMSE de validación se reporta de
@@ -279,16 +287,17 @@ vuelta en las unidades propias de cada propiedad.
 | Precisión | bf16 (pérdida en fp32) | — |
 | Partición de validación | 1 % | aleatoria; el test ya se excluyó del corpus |
 
-Con todos los pesos entrenables desde una inicialización aleatoria se emplea una única tasa
-de aprendizaje. La distinción de tasas entre cuerpo y cabeza solo tiene sentido cuando hay
-un *backbone* preentrenado que proteger.
+Como todos los pesos son entrenables desde una inicialización aleatoria, se emplea una
+única tasa de aprendizaje. Distinguir entre tasa del cuerpo y tasa de la cabeza solo tiene
+sentido cuando hay un *backbone* preentrenado que proteger.
 
 ---
 
 ## 7. Predicción de propiedades experimentales (etapa 4)
 
-El encoder se evalúa sobre tres conjuntos de regresión de MoleculeNet, con la cabeza de
-regresión reinicializada a una única salida.
+Concluido el preentrenamiento, la primera mitad del trabajo confronta lo aprendido con
+medidas experimentales. El encoder se evalúa sobre tres conjuntos de regresión de
+MoleculeNet, con la cabeza de regresión reinicializada a una única salida.
 
 | Conjunto | Propiedad | Moléculas | Test |
 |---|---|---:|---:|
@@ -308,10 +317,10 @@ Cada configuración se entrena dos veces, idénticas salvo en el origen de los p
 
 - **Sin preentrenar** — inicialización aleatoria; el modelo solo ve las 650 a 4 200
   moléculas del conjunto.
-- **Preentrenada** — parte del checkpoint de la etapa 3, descartando su cabeza.
+- **Preentrenada** — parte del checkpoint del preentrenamiento, descartando su cabeza.
 
 La primera fila no es prescindible. «RMSE 0,85 con preentrenamiento» no significa nada por
-sí solo; el resultado es la diferencia entre ambas.
+sí solo: el resultado es la diferencia entre ambas.
 
 > **Garantía · consistencia del vocabulario.** Al inicializar desde el checkpoint, el
 > vocabulario de caracteres se toma del propio checkpoint y no se reconstruye a partir del
@@ -330,10 +339,11 @@ desviación.
 
 ## 8. Generación condicionada (etapa 5)
 
-La tarea es `p(M_b | M_a, Δpropiedad)`: dada una molécula de partida y un desplazamiento
-objetivo, producir una molécula análoga que lo satisfaga. Es generación condicionada en la
-que una de las condiciones es una molécula; en la literatura de diseño de fármacos
-corresponde a optimización de *leads*.
+La segunda mitad del trabajo usa el mismo encoder para escribir moléculas en vez de
+leerlas. La tarea es `p(M_b | M_a, Δpropiedad)`: dada una molécula de partida y un
+desplazamiento objetivo, producir una molécula análoga que lo satisfaga. Es generación
+condicionada en la que una de las condiciones es una molécula; en la literatura de diseño
+de fármacos corresponde a optimización de *leads*.
 
 ### 8.1 Discretización de la condición
 
@@ -343,13 +353,13 @@ entrenamiento**.
 
 La discretización sustituye a la proyección de un escalar crudo. Un número aislado a través
 de un `Linear(1→H)` produce una señal de baja frecuencia y gradiente pobre; en el diseño
-previo, además, entraba sin estandarizar, en kcal/mol. Un índice de bin selecciona un vector
-de rango completo. Bins y *features* de Fourier resuelven el mismo problema, por lo que son
-alternativas y no se acumulan.
+previo, además, entraba sin estandarizar, en kcal/mol. Un índice de bin, en cambio,
+selecciona un vector de rango completo. Bins y *features* de Fourier resuelven el mismo
+problema, por lo que son alternativas y no se acumulan.
 
-Los cuantiles se colapsan cuando la distribución es picuda —como ocurre con los Δ acumulados
-en cero—; los bordes duplicados se funden para no crear bins inalcanzables cuyas filas del
-embedding se entrenarían con cero ejemplos.
+Los cuantiles se colapsan cuando la distribución es picuda —como ocurre con los Δ
+acumulados en cero—; los bordes duplicados se funden para no crear bins inalcanzables cuyas
+filas del embedding se entrenarían con cero ejemplos.
 
 ### 8.2 Composición del memory
 
@@ -361,10 +371,10 @@ memory = [ Δlogp │ Δtpsa │ Δqed │ Δmw │ átomo₁…átomoₙ │ ch
 Los estados del encoder entran sin poolear: un vector por átomo y uno por carácter, no un
 único vector resumen. El decoder hace *cross-attention* sobre toda la secuencia.
 
-Se conserva el token prependido en lugar de recurrir a FiLM o AdaLN. El token se ignoraba
-en el diseño previo por ser **redundante**, no por ser un token; eliminada la redundancia,
-el mecanismo más simple debería bastar. Los diagnósticos descritos abajo determinan si es
-así, y FiLM queda como alternativa documentada si no lo es.
+Se conserva el token prependido en lugar de recurrir a FiLM o AdaLN, porque el token se
+ignoraba en el diseño previo por ser **redundante**, no por ser un token; eliminada la
+redundancia, el mecanismo más simple debería bastar. Los diagnósticos descritos abajo
+determinan si es así, y FiLM queda como alternativa documentada si no lo es.
 
 ### 8.3 Decoder
 
@@ -374,14 +384,14 @@ por token sobre los SELFIES de M_b, con *teacher forcing*. Configuración: `hidd
 capas de encoder, 6 de decoder, 60 000 pasos con lote 256.
 
 El gradiente retrocede por la *cross-attention*, atraviesa el *memory* y alcanza tanto los
-embeddings de condición como el encoder. El encoder queda así entrenado por la señal
-generativa, que es lo que permite que desactivar una de sus ramas degrade la generación de
-forma medible.
+embeddings de condición como el encoder. El encoder queda así entrenado también por la
+señal generativa, que es lo que permite que desactivar una de sus ramas degrade la
+generación de forma medible.
 
 ### 8.4 Dropout de condición y guía sin clasificador
 
 Durante el entrenamiento, cada propiedad se sustituye por su bin nulo con probabilidad
-0,15, **de forma independiente** entre propiedades. La independencia permite que una
+0,15, **de forma independiente** entre propiedades. Esa independencia permite que una
 petición nombre una propiedad y deje las demás sin especificar —«Δ logP = +1, el resto me
 da igual»—, que es la petición realista; un *dropout* conjunto solo permitiría
 condicionamiento de todo o nada.
@@ -429,12 +439,13 @@ El protocolo elimina la circularidad de raíz:
 1. Se toman moléculas semilla no vistas en entrenamiento.
 2. Se solicita un Δ dentro del rango que los datos soportan, derivado de los percentiles de
    la tabla de la sección 4.
-3. Se muestrea, se decodifica SELFIES a SMILES.
+3. Se muestrea y se decodifica SELFIES a SMILES.
 4. **Se mide la propiedad real de lo generado con RDKit** y se compara con lo solicitado.
 
-La evaluación anterior puntuaba las moléculas generadas con la cabeza de regresión del
-propio checkpoint generativo: encoder compartido y misma pérdida, es decir, el modelo
-evaluándose a sí mismo. RDKit no comparte nada con el modelo.
+El contraste con la evaluación anterior es directo: aquella puntuaba las moléculas
+generadas con la cabeza de regresión del propio checkpoint generativo —encoder compartido y
+misma pérdida, es decir, el modelo evaluándose a sí mismo—, mientras que RDKit no comparte
+nada con el modelo.
 
 Métricas: tasa de acierto (fracción de generadas cuyo Δ real cae en el bin solicitado), MAE
 entre Δ pedido y obtenido, curva pedido-vs-obtenido —cuya pendiente es la fuerza del
@@ -446,9 +457,9 @@ condicionamiento—, validez, unicidad, novedad, FCD, similitud de Tanimoto a la
 ## 10. Limitaciones
 
 - **Desplazamiento de dominio en el preentrenamiento.** MOSES está filtrado a espacio
-  drug-like, mientras que FreeSolv son mayoritariamente disolventes pequeños. La
-  distribución de preentrenamiento cubre mal ese conjunto y es donde cabe esperar menor
-  transferencia.
+  drug-like, mientras que FreeSolv son mayoritariamente disolventes pequeños —el mismo
+  contraste que ya explicaba las cero coincidencias de la sección 2.3—. La distribución de
+  preentrenamiento cubre mal ese conjunto y es donde cabe esperar menor transferencia.
 - **No hay generación *de novo*.** El encoder necesita una entrada, de modo que no es
   posible generar sin molécula de partida. Es la contrapartida directa de exigir que el
   encoder sea imprescindible: la generación *de novo* carece de encoder y, por tanto, de
@@ -456,7 +467,7 @@ condicionamiento—, validez, unicidad, novedad, FCD, similitud de Tanimoto a la
   corresponde la tarea, siempre existe una molécula de partida.
 - **Rango de control acotado por los datos.** El percentil 99 del Δ de logP es ±1,77;
   solicitar desplazamientos mayores sería extrapolación.
-- **Posible dominancia de una modalidad.** Entrenando ambas ramas conjuntamente existe la
+- **Posible dominancia de una modalidad.** Al entrenar ambas ramas conjuntamente existe la
   posibilidad real de que la de SMILES asuma todo el trabajo. Sería un resultado negativo
   para la hipótesis, y es precisamente lo que la ablación de tres brazos está construida
   para detectar en lugar de ocultar.
@@ -473,3 +484,56 @@ Todo lo que dependa de resultados, que aún no existen:
 - Barrido del peso de guía.
 - Tamaños exactos de ESOL, FreeSolv y Lipophilicity tras la deduplicación por InChIKey
   (en el documento figuran como aproximados).
+
+---
+
+## Notas del editor (borrar antes de entregar)
+
+No se ha modificado ninguna cifra, nombre de función, hiperparámetro ni nombre de conjunto.
+Lo que sigue son dudas señaladas, no correcciones aplicadas.
+
+1. **§2.3, el total de la tabla no cuadra.** La columna «Moléculas en test» suma
+   112 + 65 + 420 = 597, pero la fila de total dice **591**. La columna de eliminadas sí
+   cuadra (11 + 0 + 27 = 38). Conviene revisar de dónde sale el 591 antes de que lo sume el
+   tribunal.
+
+2. **Numeración de etapas incoherente.** El diagrama de §1 define tres etapas
+   (1 = preentrenamiento, 2 = fine-tuning, 3 = decoder), mientras que los títulos de sección
+   usan otra numeración de cinco (1a corpus, 1b etiquetas, 1c pares, 2 arquitectura,
+   3 preentrenamiento, 4 predicción, 5 generación). Con ambos esquemas conviviendo, «etapa
+   3» significa el decoder en §1 y el preentrenamiento en §6. He sustituido las referencias
+   cruzadas de la prosa por nombres («el checkpoint del preentrenamiento») para no propagar
+   el choque, pero las etiquetas de los títulos siguen como estaban: hay que decidir un
+   único esquema.
+
+3. **§5.3, el diagrama contradice al texto.** El texto dice *self-attention* sobre los
+   tokens apilados; la etiqueta del diagrama dice *cross-attention*. Como no sé cuál
+   refleja el código, he dejado ambos intactos. Si la fusión atiende un conjunto de tokens
+   contra sí mismo, lo correcto es *self-attention* y sobra la etiqueta del diagrama.
+
+4. **§5 frente a §8.3, tamaño del encoder.** §5 describe el encoder con `hidden = 256` y
+   3 capas (≈ 4,7 M parámetros), y §8.3 configura la generación con `hidden 512` y 4 capas
+   de encoder. Si el decoder parte del checkpoint preentrenado —como afirma §1—, los pesos
+   de un encoder de 256/3 no cargan en uno de 512/4. Falta explicar cuál de las dos
+   configuraciones se preentrena, o si la mitad generativa reentrena su encoder desde cero;
+   en ese segundo caso conviene decirlo explícitamente, porque afecta a la afirmación de §1
+   sobre compartir pesos.
+
+5. **§6.1, la desviación típica «cercana a 28».** Coincide casi exactamente con la
+   desviación típica del **Δ** de MW de la tabla de §4.2 (27,679), que es otra magnitud: la
+   estandarización de §6 se aplica a MW absoluto, no a Δ MW. Puede ser coincidencia —el
+   rango estrecho de MOSES la hace plausible—, pero merece verificarse.
+
+6. **§8.2, «los diagnósticos descritos abajo».** La frase remite a unos diagnósticos que
+   decidirían si el token prependido basta o hay que pasar a FiLM. Lo más cercano es el
+   barrido de `w` de §8.4, junto con las métricas de §9.3. Si el criterio de decisión es
+   ese, conviene nombrarlo; si hay algún diagnóstico adicional previsto —masa de atención
+   sobre las posiciones de condición, o ΔNLL al sustituir el token—, falta describirlo.
+
+7. **§9.3, punto 1: «semillas no vistas en entrenamiento».** La partición es por scaffold
+   (§9.1), así que las semillas provienen presumiblemente de scaffolds retenidos. Una frase
+   que lo diga cierra la pregunta obvia de dónde salen esas moléculas.
+
+8. **§4.2, encabezado de la primera columna.** La columna se titula «Δ» pero contiene
+   nombres de propiedad; las demás sí son estadísticos del Δ. «Propiedad» sería más claro,
+   aunque no lo he cambiado por si el encabezado procede de la salida del script.

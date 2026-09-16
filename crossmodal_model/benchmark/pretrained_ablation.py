@@ -177,6 +177,16 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         # every row of that embedding stand for a different character.
         char_vocab = init_ckpt.get("char_vocab")
 
+    # Same rule as the generator: the encoder's shape is whatever the checkpoint was
+    # trained in, never this script's default.
+    hidden_dim, num_layers = args.hidden_dim, args.num_layers
+    if init_ckpt is not None:
+        ck_args = init_ckpt.get("args", {})
+        hidden_dim = int(ck_args.get("hidden_dim", hidden_dim))
+        num_layers = int(ck_args.get("num_layers", num_layers))
+        if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
+            print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
+
     splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab)
     train_y = torch.tensor([float(d.y) for d in splits["train"]])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
@@ -184,12 +194,12 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
 
     if is_hybrid:
         model = HybridMoLA(
-            sm_vocab_size=len(char_vocab), hidden_dim=args.hidden_dim, output_dim=1,
-            num_layers=args.num_layers, positional_smiles=True, max_sm_len=100,
+            sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
+            num_layers=num_layers, positional_smiles=True, max_sm_len=100,
         ).to(device)
     else:
         model = build_config(
-            config, hidden_dim=args.hidden_dim, output_dim=1, num_layers=args.num_layers,
+            config, hidden_dim=hidden_dim, output_dim=1, num_layers=num_layers,
             lm_freeze=args.freeze_lm, gin_variant=args.gin_variant, gin_freeze=args.freeze_gin,
         ).to(device)
     if init_ckpt is not None:

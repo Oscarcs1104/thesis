@@ -55,8 +55,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-every", type=int, default=2000)
     p.add_argument("--eval-batches", type=int, default=50)
     p.add_argument("--ckpt-every-min", type=float, default=30.0)
-    p.add_argument("--hidden-dim", type=int, default=512)
-    p.add_argument("--num-layers", type=int, default=4)
+    p.add_argument("--hidden-dim", type=int, default=256,
+                   help="encoder+decoder width. Overridden by --init-encoder, which "
+                        "must use whatever shape the checkpoint was trained in")
+    p.add_argument("--num-layers", type=int, default=3)
     p.add_argument("--decoder-layers", type=int, default=6)
     p.add_argument("--num-bins", type=int, default=20)
     p.add_argument("--cond-dropout", type=float, default=0.15)
@@ -137,20 +139,34 @@ def main() -> None:
     train_loader = GeomDataLoader(train_ds, shuffle=True, drop_last=True, **loader_kwargs)
     val_loader = GeomDataLoader(val_ds, shuffle=False, **loader_kwargs)
 
+    # Encoder dimensions come from the checkpoint, not from this script's defaults. The
+    # pretrained weights only fit the shape they were trained in, and a mismatch here
+    # fails at load time with a shape error rather than anywhere informative.
+    hidden_dim, num_layers = args.hidden_dim, args.num_layers
+    ck = None
+    if args.init_encoder:
+        ck = torch.load(args.init_encoder, map_location="cpu", weights_only=False)
+        ck_args = ck.get("args", {})
+        ck_hidden = int(ck_args.get("hidden_dim", hidden_dim))
+        ck_layers = int(ck_args.get("num_layers", num_layers))
+        if (ck_hidden, ck_layers) != (hidden_dim, num_layers):
+            print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim} -> {ck_hidden}, "
+                  f"layers {num_layers} -> {ck_layers}")
+        hidden_dim, num_layers = ck_hidden, ck_layers
+
     mola = HybridMoLA(
-        sm_vocab_size=len(cache.char_vocab), hidden_dim=args.hidden_dim, output_dim=1,
-        num_layers=args.num_layers, positional_smiles=True, max_sm_len=args.max_sm_len,
+        sm_vocab_size=len(cache.char_vocab), hidden_dim=hidden_dim, output_dim=1,
+        num_layers=num_layers, positional_smiles=True, max_sm_len=args.max_sm_len,
         use_graph=args.use_graph, use_smiles=args.use_smiles,
     )
     model = ConditionalMoleculeGenerator(
-        mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=args.hidden_dim, pad_idx=pad_idx,
+        mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=hidden_dim, pad_idx=pad_idx,
         cond_vocab_sizes=[b.num_bins + 1 for b in binners.values()],
         cond_null_bins=[b.null_bin for b in binners.values()],
         cond_dropout=args.cond_dropout, decoder_layers=args.decoder_layers,
         max_len=args.max_sm_len + 32,
     ).to(device)
-    if args.init_encoder:
-        ck = torch.load(args.init_encoder, map_location="cpu", weights_only=False)
+    if ck is not None:
         if ck.get("arch") != "hybrid":
             raise SystemExit(f"--init-encoder must be an --arch hybrid checkpoint, got "
                              f"{ck.get('arch')!r}. The pretrained-backbone architectures use a "
