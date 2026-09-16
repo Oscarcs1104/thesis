@@ -230,6 +230,17 @@ def convert_deepchem_featurized_to_pyg(root: Path) -> list[Data]:
     return data_list
 
 
+def _file_digest(path: Path) -> str:
+    """Content hash of a split file, so a rewritten split cannot reuse its own cache."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def load_graph_dataset(path: str) -> list[Data]:
     raw_path = str(path).strip()
     if not raw_path:
@@ -263,11 +274,22 @@ def load_graph_dataset(path: str) -> list[Data]:
             FEATURE_VERSION = "v0"
         stem = graph_path.name[: -len(graph_path.suffix)]
         cache_path = graph_path.with_name(f"{stem}.graphs.{FEATURE_VERSION}.pt")
+        # The schema version is not enough: the cache is also addressed by file NAME, and
+        # rewriting a split puts different molecules behind the same name. That is not
+        # hypothetical -- rebuilding the MoleculeNet partition as random left delaney's
+        # valid.csv holding 111 rows while valid.graphs.pt still held the previous
+        # split's 112, so training would have run on molecules the split no longer
+        # contained, with no error anywhere. The content decides.
+        digest = _file_digest(graph_path)
         if cache_path.exists():
-            return _torch_load(cache_path)
+            cached = _torch_load(cache_path)
+            if isinstance(cached, dict) and cached.get("digest") == digest:
+                return cached["graphs"]
+            why = "predates content checking" if not isinstance(cached, dict) else "is for older contents"
+            print(f"Graph cache {cache_path.name} {why}; rebuilding from {graph_path.name}")
         graphs = _csv_path_to_graphs(graph_path)
-        torch.save(graphs, cache_path)
-        print(f"Converted CSV to graph cache: {cache_path}")
+        torch.save({"digest": digest, "graphs": graphs}, cache_path)
+        print(f"Converted CSV to graph cache: {cache_path} ({len(graphs)} graphs)")
         return graphs
 
     # Prefer user-provided graphs_from_smiles cache if present
