@@ -29,13 +29,27 @@ fi
 # oversubscribe the machine and make it slower.
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTHONUNBUFFERED=1
 
-# Leave a couple of cores for the machine to stay usable -- this runs for hours.
-W="${WORKERS:-$(( $(nproc) > 4 ? $(nproc) - 2 : 1 ))}"
+# Leave a couple of cores for the machine to stay usable -- this runs for hours -- but
+# never fall below half of them. The previous rule collapsed to a single worker on
+# anything with four cores or fewer, which turns pair mining over 1.9M molecules from
+# hours into days, and announces it as "1 workers" quietly enough to miss.
+NCPU=$(nproc)
+W="${WORKERS:-$(( NCPU - 2 > NCPU / 2 ? NCPU - 2 : (NCPU > 1 ? NCPU / 2 : 1) ))}"
 LIMIT_ARG=${LIMIT:+--limit $LIMIT}
 F=${FORCE:+--force}
 
-python -c "import rdkit, selfies, numpy, pandas"   # fail in seconds on a bad env
-echo "== $W workers =="
+# Every import the four stages need, checked together. prepare_all.py reaches
+# torch_geometric through data_pipeline/data.py, and discovering that after the MOSES
+# download would cost an hour. torch and torch-geometric are deliberately absent from
+# requirements.txt because they come from a CUDA-specific index -- see its header.
+python -c 'import importlib.util as u, sys; m=[x for x in ("rdkit","selfies","numpy","pandas","torch","torch_geometric") if not u.find_spec(x)]; sys.exit("missing: "+", ".join(m)+"  ->  pip install torch --index-url https://download.pytorch.org/whl/cu128 ; pip install torch-geometric ; pip install -r requirements.txt" if m else 0)'
+
+echo "== $W of $NCPU cores =="
+if [[ "$W" -lt 4 ]]; then
+  echo "   WARNING: pair mining over 1.9M molecules will take a very long time at $W."
+  echo "   nproc reports $NCPU; if the machine has more, something is capping it."
+  echo "   Override with WORKERS=N."
+fi
 
 step() {
   echo
