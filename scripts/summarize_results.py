@@ -69,18 +69,29 @@ def generation_training() -> bool:
         print("  (nada todavia: falta correr scripts/slurm/train_pairs.sbatch)")
         return False
 
-    print(f"\n    {'corrida':<40} {'pasos':>8} {'val loss':>10} {'token acc':>10}")
+    print(f"\n    {'corrida':<38} {'params':>11} {'pasos':>8} {'val loss':>9} "
+          f"{'tok acc':>8} {'min':>5}")
     for f in files:
-        hist = json.loads(f.read_text(encoding="utf-8"))
-        if not hist:
-            print(f"    {f.stem:<40} {'(vacio)':>8}")
+        blob = json.loads(f.read_text(encoding="utf-8"))
+        # train_pairs.py writes {"arm", "params", "elapsed_s", "history"}; a bare list is
+        # accepted too so an older or hand-made file does not crash the whole report.
+        hist = blob.get("history", []) if isinstance(blob, dict) else blob
+        meta = blob if isinstance(blob, dict) else {}
+        evals = [h for h in hist if isinstance(h, dict) and "loss" in h]
+        if not evals:
+            print(f"    {f.stem.replace('_history', '')[:38]:<38} {'(sin evaluaciones)':>11}")
             continue
-        best = min(hist, key=lambda h: h.get("loss", float("inf")))
-        print(f"    {f.stem.replace('_history', ''):<40} {hist[-1].get('step', 0):>8,} "
-              f"{best.get('loss', float('nan')):>10.4f} {best.get('token_acc', float('nan')):>10.4f}")
+        best = min(evals, key=lambda h: h["loss"])
+        print(f"    {f.stem.replace('_history', '')[:38]:<38} "
+              f"{meta.get('params', 0):>11,} {evals[-1].get('step', 0):>8,} "
+              f"{best['loss']:>9.4f} {best.get('token_acc', float('nan')):>8.4f} "
+              f"{meta.get('elapsed_s', 0) / 60:>5.0f}")
     print("\n  Esto mide reconstruccion de SELFIES. Como los pares tienen Tanimoto >= 0.50,")
     print("  un modelo que copie la semilla puntua bien sin haber aprendido a condicionar.")
     print("  Sirve para ver que el entrenamiento convergio, no para comparar brazos.")
+    print("\n  La columna de parametros si es comparable: los brazos de una sola modalidad")
+    print("  deberian quedar cerca entre si. Si graph-only tiene ~450k y smiles-only ~3.9M,")
+    print("  el checkpoint es anterior al equiparado de capacidad y la ablacion no es valida.")
     return True
 
 
