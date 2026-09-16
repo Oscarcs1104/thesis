@@ -9,6 +9,13 @@ protobuf. Installing that beside a working torch/PyG environment risks downgradi
 under compiled wheels, which is a bad trade for one featurizer. So it runs alone, writes
 an .npz, and the training environment never imports it.
 
+    pip install deepchem tensorflow-cpu rdkit pandas
+
+RDKit is on that list because DeepChem defers importing it until inside the featurizer:
+without it the run dies after TensorFlow has loaded and the CSVs have been read, with an
+ImportError raised from within a library. Nothing from the training stack is needed --
+no torch, no torch_geometric.
+
 Writes data/deepchem_molnet/<dir>/csv/molgraphconv.npz, holding the pool in the order the
 three CSVs concatenate, flat node-feature and edge arrays with offsets, and the indices
 the featurizer accepted. That last one matters: the reference drops what the featurizer
@@ -49,13 +56,28 @@ def pool_digest(smiles, targets) -> str:
 
 
 def main() -> None:
+    # Checked up front, all of them: DeepChem defers its RDKit import into the
+    # featurizer, so a missing RDKit surfaces after TensorFlow has loaded and the CSVs
+    # have been read, as an ImportError from inside a library rather than as a missing
+    # package here.
+    import importlib.util as _u
+
+    need = {"deepchem": "deepchem", "rdkit": "rdkit", "pandas": "pandas",
+            "numpy": "numpy", "tensorflow": "tensorflow-cpu"}
+    missing = [pkg for mod, pkg in need.items() if not _u.find_spec(mod)]
+    if missing:
+        print(f"missing: {', '.join(missing)}")
+        print(f"  pip install {' '.join(missing)}")
+        print("This script runs in an environment of its own and needs nothing from the")
+        print("training stack -- no torch, no torch_geometric.")
+        raise SystemExit(2)
     try:
         import deepchem as dc
     except Exception as exc:  # noqa: BLE001
-        print(f"Could not import DeepChem: {type(exc).__name__}: {exc}")
-        print("  pip install deepchem tensorflow-cpu")
-        print("This script is meant to run in an environment of its own -- it needs")
-        print("numpy, pandas and deepchem, and nothing from the training stack.")
+        import traceback
+
+        print(f"DeepChem is installed but failed to import: {type(exc).__name__}: {exc}")
+        traceback.print_exc()
         raise SystemExit(2)
 
     for name, (subdir, target_col) in DATASETS.items():
