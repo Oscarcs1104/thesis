@@ -30,11 +30,22 @@ if str(ROOT) not in sys.path:
 def main() -> None:
     try:
         import deepchem as dc
-    except ImportError:
-        print("DeepChem is not installed here, so nothing was verified.")
-        print("  pip install deepchem        (it pulls TensorFlow; a throwaway env is fine)")
-        print("Until this runs, say the partitions follow the same procedure -- not that")
-        print("they are identical.")
+        import deepchem.splits  # noqa: F401  -- the submodule actually used
+    except Exception as exc:
+        # Not `except ImportError` with a generic message: DeepChem imports a stack of
+        # optional backends, and "not installed" and "installed but its own import chain
+        # fails" need different fixes. Swallowing the cause sent someone to reinstall a
+        # package that was already there.
+        import traceback
+
+        print("Could not import DeepChem, so nothing was verified.")
+        print(f"  {type(exc).__name__}: {exc}\n")
+        traceback.print_exc()
+        print("\nIf it is genuinely absent:  pip install deepchem")
+        print("If it is present but its import chain breaks, the missing piece is named")
+        print("above -- often a backend DeepChem imports eagerly.")
+        print("\nUntil this runs, say the partitions follow the same procedure -- not")
+        print("that they are identical.")
         raise SystemExit(2)
 
     import numpy as np
