@@ -20,11 +20,12 @@ las dos mitades del trabajo responden a la misma pregunta con evidencia independ
 hallazgo se replica en dos condiciones en lugar de descansar sobre un único experimento.
 
 ```
-                    ┌─ etapa 1 ── preentrenamiento supervisado (MOSES, 1,94 M)
-  encoder           │
-  HybridMoLA  ──────┼─ etapa 2 ── fine-tuning   ESOL · FreeSolv · Lipophilicity
-  (grafo+SMILES)    │
-                    └─ etapa 3 ── decoder SELFIES ── generación condicionada
+  §2–§4  datos          MOSES · etiquetas RDKit · pares análogos
+     │
+  §5–§6  encoder        HybridMoLA, preentrenado sobre 1,94 M moléculas
+     │
+     ├── §7  tarea A    fine-tuning   ESOL · FreeSolv · Lipophilicity
+     └── §8  tarea B    decoder SELFIES ── generación condicionada
 ```
 
 Un único checkpoint del preentrenamiento alimenta tanto el fine-tuning como el decoder. Es
@@ -36,7 +37,7 @@ se mide.
 
 ---
 
-## 2. Corpus de preentrenamiento (etapa 1a)
+## 2. Corpus de preentrenamiento
 
 Se emplea **MOSES** (Molecular Sets), un subconjunto curado de ZINC restringido a espacio
 químico *drug-like*. Se elige frente a volcados mayores por estar depurado y por disponer
@@ -83,7 +84,11 @@ escritura distinta de la misma molécula también se detecte.
 | ESOL | 112 | 11 |
 | FreeSolv | 65 | 0 |
 | Lipophilicity | 420 | 27 |
-| **Total** | **591** | **38** |
+| **Total (InChIKeys únicos)** | **591** | **38** |
+
+La fila de total cuenta **InChIKeys únicos**, no la suma de las tres filas: 597 − 591 = 6
+moléculas figuran en el conjunto de test de más de un dataset, y basta una coincidencia
+para excluirlas del corpus. La columna de eliminadas sí es aditiva.
 
 El patrón es químicamente coherente: FreeSolv son disolventes pequeños y no se solapa con
 un corpus drug-like, mientras que Lipophilicity procede de ChEMBL y aporta la mayoría de
@@ -99,7 +104,7 @@ Tras estos filtros el corpus queda en **1 936 539 moléculas**.
 
 ---
 
-## 3. Etiquetado con oráculo exacto (etapa 1b)
+## 3. Etiquetado con oráculo exacto
 
 Depurado el corpus, falta dotarlo de señal supervisada. Para cada molécula se calculan
 cuatro descriptores con RDKit:
@@ -132,7 +137,7 @@ corpus; se filtran aguas abajo.
 
 ---
 
-## 4. Minado de pares análogos (etapa 1c)
+## 4. Minado de pares análogos
 
 Esta etapa construye la señal de entrenamiento de la mitad generativa y es la que resuelve
 el problema central del diseño previo.
@@ -185,7 +190,7 @@ vio miles de veces.
 
 El resultado son **12 991 314 pares**, de los cuales 649 566 son de identidad.
 
-| Δ | desv. típica | p1 | p99 | \|Δ\| > 1 σ |
+| Propiedad | desv. típica de Δ | p1 | p99 | \|Δ\| > 1 σ |
 |---|---:|---:|---:|---:|
 | logP | 0,685 | −1,766 | +1,766 | 27,7 % |
 | TPSA | 15,784 | −43,09 | +43,09 | 29,4 % |
@@ -203,7 +208,7 @@ que este diseño corrige.
 
 ---
 
-## 5. Arquitectura del encoder (etapa 2)
+## 5. Arquitectura del encoder
 
 El encoder, **HybridMoLA**, tiene dos ramas y un mecanismo de fusión entre capas. Con
 `hidden = 256` y 3 capas suma aproximadamente **4,7 M parámetros**.
@@ -243,11 +248,15 @@ permutación y diluido por padding no puede sostener generación coherente.
 
 La fusión no combina únicamente la salida final de cada rama. Cada capa de cada modalidad
 aporta un token; todos se apilan y se someten a *self-attention* con 8 cabezas, y el
-resultado se reduce con una suma ponderada por pesos aprendidos, uno por token.
+resultado se reduce con una suma ponderada por pesos aprendidos, uno por token. La
+operación es *self-attention*: el conjunto de tokens se atiende contra sí mismo, con
+consulta, clave y valor idénticos. En el código de MoLA el módulo se llama
+`cross_attention` porque cruza modalidades y profundidades, pero formalmente es
+auto-atención sobre el conjunto apilado.
 
 ```
 capa 1    [ token_grafo₁ , token_smiles₁ ]  ┐
-capa 2    [ token_grafo₂ , token_smiles₂ ]  ├─ cross-attention ─ suma ponderada
+capa 2    [ token_grafo₂ , token_smiles₂ ]  ├─ self-attention ── suma ponderada
 capa 3    [ token_grafo₃ , token_smiles₃ ]  ┘   (8 cabezas)      (pesos aprendidos)
 ```
 
@@ -262,7 +271,7 @@ la que el preentrenamiento descrito a continuación no congela nada.
 
 ---
 
-## 6. Preentrenamiento supervisado (etapa 3)
+## 6. Preentrenamiento supervisado
 
 El encoder se entrena sobre el corpus completo con una cabeza de regresión multitarea que
 predice las cuatro etiquetas de RDKit simultáneamente. El interés no está en esos cuatro
@@ -272,8 +281,10 @@ valores, sino en la representación que el encoder desarrolla al producirlos.
 
 Las cuatro propiedades se estandarizan con la media y la desviación del conjunto de
 entrenamiento. Sin ello, un error cuadrático medio sin ponderar estaría dominado por el
-peso molecular —desviación típica cercana a 28— frente al QED —cercana a 0,1—, y el modelo
-resultante sería un regresor de MW con tres adornos. El RMSE de validación se reporta de
+peso molecular, cuya desviación típica se mide en decenas de daltons, frente al QED, cuya
+escala completa es el intervalo [0, 1]; el modelo resultante sería un regresor de MW con
+tres adornos. Los valores exactos de media y desviación por propiedad quedan registrados
+en `labels_meta.json` y se reportan junto a los resultados. El RMSE de validación se reporta de
 vuelta en las unidades propias de cada propiedad.
 
 ### 6.2 Configuración
@@ -293,7 +304,7 @@ sentido cuando hay un *backbone* preentrenado que proteger.
 
 ---
 
-## 7. Predicción de propiedades experimentales (etapa 4)
+## 7. Predicción de propiedades experimentales
 
 Concluido el preentrenamiento, la primera mitad del trabajo confronta lo aprendido con
 medidas experimentales. El encoder se evalúa sobre tres conjuntos de regresión de
@@ -337,7 +348,7 @@ desviación.
 
 ---
 
-## 8. Generación condicionada (etapa 5)
+## 8. Generación condicionada
 
 La segunda mitad del trabajo usa el mismo encoder para escribir moléculas en vez de
 leerlas. La tarea es `p(M_b | M_a, Δpropiedad)`: dada una molécula de partida y un
@@ -373,15 +384,23 @@ Los estados del encoder entran sin poolear: un vector por átomo y uno por cará
 
 Se conserva el token prependido en lugar de recurrir a FiLM o AdaLN, porque el token se
 ignoraba en el diseño previo por ser **redundante**, no por ser un token; eliminada la
-redundancia, el mecanismo más simple debería bastar. Los diagnósticos descritos abajo
-determinan si es así, y FiLM queda como alternativa documentada si no lo es.
+redundancia, el mecanismo más simple debería bastar. Los diagnósticos de §8.5 determinan si
+es así, y FiLM queda como alternativa documentada si no lo es.
 
 ### 8.3 Decoder
 
 `nn.TransformerDecoder` estándar: *self-attention* causal sobre los tokens ya emitidos,
 *cross-attention* sobre el *memory* con máscara de acolchado, y pérdida de entropía cruzada
-por token sobre los SELFIES de M_b, con *teacher forcing*. Configuración: `hidden 512`, 4
-capas de encoder, 6 de decoder, 60 000 pasos con lote 256.
+por token sobre los SELFIES de M_b, con *teacher forcing*. El decoder tiene 6 capas y se
+entrena 60 000 pasos con lote 256.
+
+El encoder conserva exactamente la configuración con la que fue preentrenado —`hidden = 256`
+y 3 capas—, y no podría ser de otro modo: unos pesos preentrenados solo encajan en la forma
+en que se entrenaron. El ancho del decoder queda fijado por el mismo valor, porque
+*cross-attiende* sobre el *memory* que produce el encoder. En la implementación, los scripts
+de fine-tuning y de generación leen esas dimensiones del propio checkpoint en lugar de
+tomarlas de sus valores por defecto, de modo que la cadena permanece consistente aunque el
+preentrenamiento se repita con otro tamaño.
 
 El gradiente retrocede por la *cross-attention*, atraviesa el *memory* y alcanza tanto los
 embeddings de condición como el encoder. El encoder queda así entrenado también por la
@@ -405,6 +424,39 @@ logits = logits_sin_condición + w · (logits_con_condición − logits_sin_cond
 El peso `w` regula la intensidad del control y permite un barrido completo de resultados
 con un solo modelo entrenado. Es además un diagnóstico sin coste adicional de
 entrenamiento: **si aumentar `w` no cambia nada, la condición no se está utilizando.**
+
+### 8.5 Diagnósticos de uso de la condición
+
+El fallo del diseño previo no fue que el condicionamiento funcionara mal, sino que no
+existía sin que nada lo delatara: la pérdida bajaba, las moléculas eran válidas, y el token
+simplemente no se leía. Por eso el método incorpora tres comprobaciones cuyo único
+propósito es detectar esa situación, independientes de la calidad de lo generado.
+
+**Barrido del peso de guía.** Se muestrea el mismo conjunto de semillas y condiciones con
+`w` creciente. Si el control de propiedad no mejora al aumentar `w`, la condición no está
+interviniendo en la predicción. No requiere reentrenar y su coste es una pasada adicional
+por muestreo.
+
+**ΔNLL con la condición alterada.** Se recalcula la entropía cruzada de validación
+sustituyendo los tokens de condición por variantes que no llevan información sobre el par:
+bin nulo, bins aleatorios, y —la prueba decisiva— los bins **barajados dentro del lote**,
+que conservan exactamente la distribución marginal y solo rompen el emparejamiento entre
+molécula y Δ. Se reporta la diferencia respecto de la condición correcta con un intervalo
+de confianza *bootstrap* emparejado por molécula. Si ese intervalo contiene el cero, la
+condición no aporta información incremental y el condicionamiento es nominal. El intervalo
+es imprescindible: sin él, un ΔNLL pequeño no se distingue del ruido.
+
+**Masa de atención sobre las posiciones de condición.** Se registran los pesos de
+*cross-attention* del decoder y se promedia, sobre capas, cabezas y posiciones objetivo no
+acolchadas, la fracción que recae sobre los cuatro tokens de condición. La referencia es la
+masa uniforme, 4/(4 + N + L): si la observada no la supera, el decoder no los mira. El mismo
+registro desglosa la masa entre nodos de grafo y caracteres SMILES, lo que indica sobre qué
+rama del encoder se apoya realmente el decoder.
+
+Las dos últimas están implementadas sobre el diseño anterior en
+`crossmodal_model/generation/ablate_prop_token.py`, donde sirvieron para documentar por qué
+aquel condicionamiento no funcionaba; el procedimiento se traslada sin cambios al esquema de
+bins sustituyendo el escalar por los cuatro tokens.
 
 ---
 
@@ -436,9 +488,11 @@ convertiría la comparación en una sobre tiempo de reloj en lugar de sobre las 
 
 El protocolo elimina la circularidad de raíz:
 
-1. Se toman moléculas semilla no vistas en entrenamiento.
+1. Se toman moléculas semilla del **split de test**, es decir, pertenecientes a scaffolds
+   que el modelo no vio en ningún par de entrenamiento. Por la partición descrita en 9.1,
+   ninguna de esas moléculas apareció como origen ni como destino.
 2. Se solicita un Δ dentro del rango que los datos soportan, derivado de los percentiles de
-   la tabla de la sección 4.
+   la tabla de §4.
 3. Se muestrea y se decodifica SELFIES a SMILES.
 4. **Se mide la propiedad real de lo generado con RDKit** y se compara con lo solicitado.
 
@@ -486,54 +540,3 @@ Todo lo que dependa de resultados, que aún no existen:
   (en el documento figuran como aproximados).
 
 ---
-
-## Notas del editor (borrar antes de entregar)
-
-No se ha modificado ninguna cifra, nombre de función, hiperparámetro ni nombre de conjunto.
-Lo que sigue son dudas señaladas, no correcciones aplicadas.
-
-1. **§2.3, el total de la tabla no cuadra.** La columna «Moléculas en test» suma
-   112 + 65 + 420 = 597, pero la fila de total dice **591**. La columna de eliminadas sí
-   cuadra (11 + 0 + 27 = 38). Conviene revisar de dónde sale el 591 antes de que lo sume el
-   tribunal.
-
-2. **Numeración de etapas incoherente.** El diagrama de §1 define tres etapas
-   (1 = preentrenamiento, 2 = fine-tuning, 3 = decoder), mientras que los títulos de sección
-   usan otra numeración de cinco (1a corpus, 1b etiquetas, 1c pares, 2 arquitectura,
-   3 preentrenamiento, 4 predicción, 5 generación). Con ambos esquemas conviviendo, «etapa
-   3» significa el decoder en §1 y el preentrenamiento en §6. He sustituido las referencias
-   cruzadas de la prosa por nombres («el checkpoint del preentrenamiento») para no propagar
-   el choque, pero las etiquetas de los títulos siguen como estaban: hay que decidir un
-   único esquema.
-
-3. **§5.3, el diagrama contradice al texto.** El texto dice *self-attention* sobre los
-   tokens apilados; la etiqueta del diagrama dice *cross-attention*. Como no sé cuál
-   refleja el código, he dejado ambos intactos. Si la fusión atiende un conjunto de tokens
-   contra sí mismo, lo correcto es *self-attention* y sobra la etiqueta del diagrama.
-
-4. **§5 frente a §8.3, tamaño del encoder.** §5 describe el encoder con `hidden = 256` y
-   3 capas (≈ 4,7 M parámetros), y §8.3 configura la generación con `hidden 512` y 4 capas
-   de encoder. Si el decoder parte del checkpoint preentrenado —como afirma §1—, los pesos
-   de un encoder de 256/3 no cargan en uno de 512/4. Falta explicar cuál de las dos
-   configuraciones se preentrena, o si la mitad generativa reentrena su encoder desde cero;
-   en ese segundo caso conviene decirlo explícitamente, porque afecta a la afirmación de §1
-   sobre compartir pesos.
-
-5. **§6.1, la desviación típica «cercana a 28».** Coincide casi exactamente con la
-   desviación típica del **Δ** de MW de la tabla de §4.2 (27,679), que es otra magnitud: la
-   estandarización de §6 se aplica a MW absoluto, no a Δ MW. Puede ser coincidencia —el
-   rango estrecho de MOSES la hace plausible—, pero merece verificarse.
-
-6. **§8.2, «los diagnósticos descritos abajo».** La frase remite a unos diagnósticos que
-   decidirían si el token prependido basta o hay que pasar a FiLM. Lo más cercano es el
-   barrido de `w` de §8.4, junto con las métricas de §9.3. Si el criterio de decisión es
-   ese, conviene nombrarlo; si hay algún diagnóstico adicional previsto —masa de atención
-   sobre las posiciones de condición, o ΔNLL al sustituir el token—, falta describirlo.
-
-7. **§9.3, punto 1: «semillas no vistas en entrenamiento».** La partición es por scaffold
-   (§9.1), así que las semillas provienen presumiblemente de scaffolds retenidos. Una frase
-   que lo diga cierra la pregunta obvia de dónde salen esas moléculas.
-
-8. **§4.2, encabezado de la primera columna.** La columna se titula «Δ» pero contiene
-   nombres de propiedad; las demás sí son estadísticos del Δ. «Propiedad» sería más claro,
-   aunque no lo he cambiado por si el encabezado procede de la salida del script.
