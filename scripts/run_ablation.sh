@@ -48,7 +48,14 @@ fi
 
 run_row() {
   local name="$1"; shift
-  local out="results/pretrained_ablation_${TAG}_${name}.csv"
+  # The configs go in the filename. pretrained_ablation.py appends rather than
+  # overwrites -- deliberately, so a table can be built up a row at a time -- and with a
+  # name fixed per split protocol every rerun piled into the same file. Runs over 1117
+  # and 1128 ESOL molecules and three different architectures ended up in one CSV, which
+  # is how a "from scratch" line came to average three architectures over an n of 18.
+  local cfgtag
+  cfgtag=$(echo "${CONFIGS:-hybrid}" | tr ' ' '-')
+  local out="results/pretrained_ablation_${TAG}_${cfgtag}_${name}.csv"
   echo
   echo "=== fila: $name -> $out ($(date +%H:%M:%S)) ==="
   python crossmodal_model/benchmark/pretrained_ablation.py \
