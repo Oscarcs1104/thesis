@@ -1,11 +1,18 @@
-"""Download the raw MoleculeNet regression CSVs and write a frozen scaffold split.
+"""Download the raw MoleculeNet regression CSVs and write a frozen split.
 
 No deepchem / tensorflow needed: the three CSVs live in DeepChem's public S3
-bucket and are already in raw target units. Scaffold splitting uses
-`data_pipeline/splitters.py` (deterministic Bemis-Murcko, largest scaffold groups
-to train first -- the same policy as DeepChem's ScaffoldSplitter; not guaranteed
-byte-identical to `dc.molnet.load_*(splitter="scaffold")`, but the standard
-scaffold-split protocol).
+bucket and are already in raw target units.
+
+--split random (the default) is what the MoleculeNet paper recommends for these three
+physical-chemistry regression sets; scaffold splitting is its convention for the
+biological classification sets, and is the harder partition. Scaffold splitting uses
+`data_pipeline/splitters.py` (deterministic Bemis-Murcko, largest scaffold groups to
+train first -- the same policy as DeepChem's ScaffoldSplitter, though not guaranteed
+byte-identical to `dc.molnet.load_*(splitter="scaffold")`).
+
+Whichever is chosen, the MOSES pretraining corpus excludes every molecule of all three
+datasets across all splits (see data_pipeline/moses.py), so switching partitions cannot
+reintroduce leakage into the pretrained encoder.
 
     python data_pipeline/download_molnet.py --output-dir data/deepchem_molnet
 """
@@ -43,7 +50,7 @@ def _inchikey(smiles: str):
         return None
 
 
-def download_one(name: str, parent_dir: Path, split: str = "scaffold",
+def download_one(name: str, parent_dir: Path, split: str = "random",
                  fracs=(0.8, 0.1, 0.1), seed: int = 2025, force: bool = False,
                  n_mad: float = 5.0, drop_outliers: bool = False) -> None:
     remote_file, smi_col, tgt_col = DATASETS[name]
@@ -116,7 +123,7 @@ def main() -> None:
                          "changes the benchmark: RMSE falls because the hardest molecules "
                          "are gone, and the numbers stop being comparable to any published "
                          "MoleculeNet result. Off by default for that reason")
-    ap.add_argument("--split", default="scaffold", choices=["scaffold", "random"])
+    ap.add_argument("--split", default="random", choices=["random", "scaffold"])
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--force", action="store_true", help="re-download even if the raw CSV is cached")
     args = ap.parse_args()

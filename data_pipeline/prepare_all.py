@@ -1,7 +1,8 @@
 """One command to (re)build every dataset artifact deterministically.
 
   1. download ESOL / FreeSolv / Lipophilicity (raw MoleculeNet CSVs) and write a
-     frozen SCAFFOLD split to data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
+     frozen split to data/deepchem_molnet/<name>/csv/{train,valid,test}.csv
+     (--split random by default; --split scaffold for the harder partition)
   2. warm the PyG graph cache for every split CSV (OGB-style features)
   3. warm the graph cache for data/zinc15_250K.csv -- OPTIONAL, --skip-zinc turns it
      off. It fed the superseded pseudo-labelling generator; the conditional
@@ -33,6 +34,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-dir", default="data/deepchem_molnet")
     ap.add_argument("--zinc-csv", default="data/zinc15_250K.csv")
+    ap.add_argument("--split", default="random", choices=["random", "scaffold"],
+                    help="MoleculeNet partition. Random is what the MoleculeNet paper "
+                         "recommends for these three physical-chemistry regression sets; "
+                         "scaffold is harder and is the convention for the biological "
+                         "classification sets. The corpus deduplication covers every split "
+                         "of all three datasets, so changing this does not affect it")
     ap.add_argument("--seed", type=int, default=2025)
     ap.add_argument("--skip-download", action="store_true")
     ap.add_argument("--n-mad", type=float, default=5.0,
@@ -54,7 +61,7 @@ def main() -> None:
         from data_pipeline.download_molnet import download_one
 
         for molnet_name in _MOLNET:
-            download_one(molnet_name, out_base, split="scaffold", seed=args.seed,
+            download_one(molnet_name, out_base, split=args.split, seed=args.seed,
                          force=args.force, n_mad=args.n_mad,
                          drop_outliers=args.drop_outliers)
 

@@ -10,14 +10,16 @@ What this produces, all under --out-dir:
     selfies_tokens.npy    int16 [N, max_len]  -- padded with 0 (<PAD>)
     selfies_lengths.npy   int16 [N]           -- real token count per molecule
     vocab.json            token <-> id, compatible with common/selfies_vocab.py's layout
-    dedup_report.json     what was removed for overlapping with the evaluation test sets
+    dedup_report.json     what was removed for overlapping with the evaluation datasets
     meta.json             counts, token-length percentiles, the exact settings used
 
 Deduplication (the part that has to survive a defense): every molecule whose InChIKey
-appears in the TEST split of esol / freesolv / lipo is dropped from the corpus, because
-Block 4 fine-tunes on those same datasets and any overlap would make the transfer result
-indefensible. InChIKey, not raw SMILES, so a differently-written form of the same molecule
-is still caught. Scaffold overlap is *reported* but not removed -- removing it would strip
+appears ANYWHERE in esol / freesolv / lipo -- train, valid or test -- is dropped from the
+corpus, because the encoder is later fine-tuned on those same datasets and any overlap
+would make the transfer result indefensible. Excluding the whole dataset rather than only
+its test split keeps the corpus independent of which partition is in use, so changing from
+a scaffold to a random split does not silently reintroduce leakage. InChIKey, not raw
+SMILES, so a differently-written form of the same molecule is still caught. Scaffold overlap is *reported* but not removed -- removing it would strip
 whole chemotypes and is not what the literature does; the number just has to be stated.
 
 Usage:
@@ -52,11 +54,18 @@ END_TOKEN = "<END>"
 UNK_TOKEN = "<OTHER>"
 SPECIAL_TOKENS = [PAD_TOKEN, START_TOKEN, END_TOKEN, UNK_TOKEN]
 
-# Test splits whose molecules must not appear in the pretraining corpus.
+# Every molecule of the three evaluation datasets is excluded from the pretraining
+# corpus -- all three splits, not only test. Anchoring the exclusion to test.csv would
+# tie the corpus to one particular partition: switching from a scaffold split to a random
+# one reshuffles which molecules are test, and corpus molecules that were safe under the
+# old partition would silently become test molecules under the new one. Excluding the
+# whole dataset costs a few hundred molecules out of 1.94M and makes the corpus immune to
+# any later change of split.
+EVAL_DATASET_DIRS = [("esol", "delaney"), ("freesolv", "freesolv"), ("lipo", "lipo")]
+EVAL_SPLITS = ("train", "valid", "test")
 EVAL_TEST_CSVS = [
-    ("esol", "data/deepchem_molnet/delaney/csv/test.csv"),
-    ("freesolv", "data/deepchem_molnet/freesolv/csv/test.csv"),
-    ("lipo", "data/deepchem_molnet/lipo/csv/test.csv"),
+    (name, f"data/deepchem_molnet/{d}/csv/{split}.csv")
+    for name, d in EVAL_DATASET_DIRS for split in EVAL_SPLITS
 ]
 
 
@@ -157,13 +166,15 @@ def _imap(fn, items, workers: int, chunksize: int, desc: str):
 
 
 def _load_eval_inchikeys(allow_missing: bool = False) -> Tuple[Dict[str, set], set]:
-    """InChIKeys and Murcko scaffolds of every molecule in the three TEST splits."""
+    """InChIKeys and Murcko scaffolds of every molecule in the three datasets."""
     from rdkit import Chem, RDLogger
 
     RDLogger.DisableLog("rdApp.*")
 
     per_dataset: Dict[str, set] = {}
     scaffolds: set = set()
+    for name, _ in EVAL_DATASET_DIRS:
+        per_dataset.setdefault(name, set())
     missing = [rel for _, rel in EVAL_TEST_CSVS if not (ROOT / rel).exists()]
     if missing and not allow_missing:
         raise SystemExit(
@@ -178,10 +189,9 @@ def _load_eval_inchikeys(allow_missing: bool = False) -> Tuple[Dict[str, set], s
     for name, rel in EVAL_TEST_CSVS:
         path = ROOT / rel
         if not path.exists():
-            print(f"  [warn] {rel} missing -- {name} NOT checked for overlap")
-            per_dataset[name] = set()
+            print(f"  [warn] {rel} missing -- NOT checked for overlap")
             continue
-        keys = set()
+        keys = per_dataset[name]
         for smi in pd.read_csv(path)["smiles"].astype(str):
             mol = Chem.MolFromSmiles(smi)
             if mol is None:
@@ -193,8 +203,8 @@ def _load_eval_inchikeys(allow_missing: bool = False) -> Tuple[Dict[str, set], s
             if key:
                 keys.add(key)
             scaffolds.add(_scaffold_one(Chem.MolToSmiles(mol)))
-        per_dataset[name] = keys
-        print(f"  {name}: {len(keys)} test molecules")
+    for name, _ in EVAL_DATASET_DIRS:
+        print(f"  {name}: {len(per_dataset[name])} molecules excluded from the corpus")
     return per_dataset, scaffolds
 
 
