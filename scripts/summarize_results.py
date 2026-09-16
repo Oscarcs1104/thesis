@@ -50,15 +50,36 @@ def predictive() -> bool:
     df = pd.concat(frames, ignore_index=True)
 
     key = "pretrained" if "pretrained" in df.columns else "source"
+    # pretrained is bool(args.init_checkpoint): whether the encoder started from the MOSES
+    # checkpoint or from random init. True/False is what the CSV stores and a poor thing
+    # to read in a table, so it is spelled out.
+    label = {True: "preentrenado (MOSES)", False: "desde cero",
+             "init": "preentrenado (MOSES)", "scratch": "desde cero"}
     for dataset, g in df.groupby("dataset"):
         print(f"\n  {dataset}")
         print(f"    {'fila':<22} {'RMSE':>16} {'MAE':>9} {'R2':>8} {'n':>3}")
+        rows = {}
         for row_key, gg in g.groupby(key):
-            n = len(gg)
-            print(f"    {str(row_key):<22} {gg['rmse'].mean():>8.4f} +/- {gg['rmse'].std():<5.4f}"
-                  f" {gg['mae'].mean():>8.4f} {gg['r2'].mean():>8.4f} {n:>3}")
-    print("\n  RMSE menor es mejor. La desviacion es sobre semillas; si dos filas se")
-    print("  solapan dentro de ella, la diferencia no es un resultado.")
+            rows[row_key] = gg["rmse"]
+            print(f"    {label.get(row_key, str(row_key)):<22} "
+                  f"{gg['rmse'].mean():>8.4f} +/- {gg['rmse'].std():<5.4f}"
+                  f" {gg['mae'].mean():>8.4f} {gg['r2'].mean():>8.4f} {len(gg):>3}")
+        # Whether the gap survives the seed spread is the whole question for this table,
+        # so it is stated rather than left to the reader to eyeball two columns.
+        if len(rows) == 2:
+            (ka, a), (kb, b) = rows.items()
+            gap = a.mean() - b.mean()
+            spread = (a.std() + b.std()) / 2
+            better = label.get(ka if gap < 0 else kb, "?")
+            if abs(gap) < spread:
+                print(f"      -> diferencia {abs(gap):.4f}, dentro de la dispersion entre "
+                      f"semillas ({spread:.4f}): no es un resultado")
+            else:
+                print(f"      -> {better} mejor por {abs(gap):.4f} RMSE, "
+                      f"{abs(gap) / max(spread, 1e-9):.1f}x la dispersion entre semillas")
+    print("\n  RMSE menor es mejor. La desviacion es sobre semillas. Con 3 semillas esto es")
+    print("  una comprobacion de cordura, no una prueba estadistica: sirve para descartar")
+    print("  diferencias que no existen, no para afirmar las que si.")
     return True
 
 
