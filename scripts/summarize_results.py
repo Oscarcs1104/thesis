@@ -126,16 +126,19 @@ def oracle() -> bool:
         return False
 
     print(f"\n    {'brazo':<30} {'w':>4} {'rho':>7} {'pend.':>7} {'valid':>6} "
-          f"{'unico':>6} {'novel':>6} {'copia':>6} {'tanim':>6}")
+          f"{'unico':>6} {'novel':>6} {'copia':>6} {'tanim':>6} {'nulo':>7} {'sd':>6}")
     for f in files:
         s = json.loads(f.read_text(encoding="utf-8"))
         name = f.parent.name
         for w, g in sorted(s.get("guidance", {}).items(), key=lambda kv: float(kv[0])):
+            nc = g.get("null_control", {})
             print(f"    {name[:30]:<30} {float(w):>4.1f} "
                   f"{g['spearman_request_vs_obtained']:>+7.3f} "
                   f"{g['slope_obtained_per_requested']:>+7.3f} "
                   f"{g['validity']:>6.3f} {g['uniqueness']:>6.3f} {g['novelty']:>6.3f} "
-                  f"{g['copy_rate']:>6.3f} {g['mean_tanimoto_to_seed']:>6.3f}")
+                  f"{g['copy_rate']:>6.3f} {g['mean_tanimoto_to_seed']:>6.3f} "
+                  f"{nc.get('mean_delta', float('nan')):>+7.3f} "
+                  f"{nc.get('std_delta', float('nan')):>6.3f}")
             name = ""      # solo en la primera fila de cada brazo
     print("\n  rho   correlacion entre el bin pedido y el delta obtenido, intra-semilla.")
     print("        Es el numero. Un modelo que ignora la condicion da ~0 aunque su")
@@ -145,6 +148,10 @@ def oracle() -> bool:
     print("        no existe, pero copia alta con rho ~0 es el modo de fallo esperado.")
     print("\n  Si rho no sube al subir w, la guia libre de clasificador no esta haciendo")
     print("  nada, que es el diagnostico gratis que esa perilla compra.")
+    print("\n  nulo  el mismo brazo, mismas semillas, condicion puesta al bin nulo. Es la")
+    print("        referencia honesta: si su delta medio y su dispersion se parecen a los")
+    print("        de los bins pedidos, la condicion no esta haciendo el trabajo y rho")
+    print("        viene de otra parte. Debe rondar cero con dispersion ancha.")
     return True
 
 
