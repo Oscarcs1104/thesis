@@ -35,6 +35,15 @@
 
 # WANDB=1 logs to Weights & Biases; WANDB_MODE=offline if the node has no network.
 
+# The corpus job (scripts/slurm/block1_data.sbatch) runs on the CPU partition and this
+# one on the GPU partition, so they do NOT queue behind each other -- launching both
+# at once has this job reading corpus.csv and labels.npy while the other is rewriting
+# them. Chain them explicitly:
+#
+#   B1=$(sbatch --parsable scripts/slurm/block1_data.sbatch)
+#   sbatch --dependency=afterok:$B1 scripts/slurm/pretrain_moses.sbatch
+#
+
 #SBATCH --job-name=thesis-pretrain
 #SBATCH --account=mol_thesis
 #SBATCH --partition=gpu-cvail01

@@ -63,6 +63,27 @@ from crossmodal_model.model.mola_pretrained import CONFIGS, build_config  # noqa
 from data_pipeline.rdkit_labels import PROPERTIES  # noqa: E402
 
 
+def assert_corpus_consistent(**arrays) -> None:
+    """Every artifact of the corpus must have exactly one row per molecule.
+
+    They are written by separate stages of block1_data.sbatch, in order, so a consumer
+    that starts while that job is still running sees some files from the old corpus and
+    some from the new one. Row i of labels.npy would then describe a different molecule
+    than row i of corpus.csv: the model trains, the loss falls, and it has learned noise.
+    Slicing to the shortest -- which is what an unchecked [:len(x)] does -- hides exactly
+    this, so the mismatch has to raise.
+    """
+    sizes = {name: len(value) for name, value in arrays.items()}
+    if len(set(sizes.values())) > 1:
+        detail = "".join(f"  {n:24s} {v:>12,}\n" for n, v in sizes.items())
+        raise SystemExit(
+            "Corpus artifacts disagree on how many molecules there are:\n"
+            + detail
+            + "They are probably from different runs of data_pipeline/moses.py. Let the "
+            "corpus job finish, then rebuild any cache with --rebuild-cache."
+        )
+
+
 class MosesRegressionDataset(GeomDataset):
     """Graph (Hu et al. schema) + raw SMILES for the LM + the four standardized targets."""
 
@@ -203,7 +224,9 @@ def main() -> None:
         raise SystemExit(f"cache at {cache_path} uses the {cache.schema!r} schema but "
                          f"--arch {args.arch} needs {schema!r}. Pass --rebuild-cache.")
 
-    usable = np.flatnonzero(np.isfinite(labels).all(axis=1) & cache.valid[:len(labels)])
+    assert_corpus_consistent(**{"corpus.csv": corpus, "labels.npy": labels,
+                                "graph cache": cache})
+    usable = np.flatnonzero(np.isfinite(labels).all(axis=1) & cache.valid)
     rng = np.random.default_rng(args.seed)
     perm = rng.permutation(usable)
     n_val = int(len(perm) * args.val_frac)

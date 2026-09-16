@@ -223,6 +223,18 @@ def build_pair_datasets(
     vocab["id_to_token"] = {int(k): v for k, v in vocab["id_to_token"].items()}
     smiles = corpus["smiles"].astype(str).tolist()
 
+    # Same hazard as in pretrain_moses.py: these files are written by successive stages
+    # of the corpus job, so a consumer that starts mid-run mixes old and new rows.
+    from crossmodal_model.train.pretrain_moses import assert_corpus_consistent
+
+    assert_corpus_consistent(**{"corpus.csv": corpus, "labels.npy": labels,
+                                "selfies_tokens.npy": targets})
+    if int(pairs.max()) >= len(corpus):
+        raise SystemExit(
+            f"pairs.npy indexes molecule {int(pairs.max()):,} but corpus.csv holds only "
+            f"{len(corpus):,}. The pair file is from a different corpus build."
+        )
+
     cache_path = corpus_dir / cache_name("ogb")
     if cache_path.exists() and not rebuild_cache:
         cache = MoleculeGraphCache.load(cache_path)
