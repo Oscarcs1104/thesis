@@ -9,6 +9,7 @@ Seven configurations x three datasets x N seeds -> one CSV:
     molformer+gin    both, fused by MoLA cross-layer attention
     hybrid           the thesis's own HybridMoLA, from scratch
     mola             the original MoLA on dc.feat.MolGraphConvFeaturizer features
+    mola-fixed       the same, with the SMILES branch attending over characters
 
 'mola' is the reference implementation this work is measured against, reproduced here
 rather than compared to from the outside: the same pool, the same partitioner, the same
@@ -95,7 +96,7 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 'hybrid' is the thesis's own encoder, trained from scratch, and the only row whose
 # checkpoint can go on to initialize the generation half: the others use the Hu et al.
 # 2+2 featurization and have no character-level SMILES branch.
-ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola")
+ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola", "mola-fixed")
 
 CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
@@ -334,7 +335,7 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
-    is_mola = config == "mola"
+    is_mola = config in ("mola", "mola-fixed")
     if is_mola:
         if init_ckpt is not None:
             raise SystemExit("--configs mola has no MOSES-pretrained checkpoint: the one "
@@ -355,10 +356,23 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         # graph_dim is an integer here: MolGraphConvFeaturizer emits a dense float vector
         # per atom, which MoLA projects with a Linear, where HybridMoLA takes categorical
         # OGB columns through an embedding table per column.
+        # positional_smiles is the whole difference between the two mola rows, and it is
+        # not a tuning knob. False is MoLA as published and as the reference run builds
+        # it: sm_embed comes out [B, L, H] and goes into a TransformerEncoderLayer with
+        # batch_first=False, which reads it as [seq, batch, feature]. Attention therefore
+        # runs across the B axis -- every molecule attends to every OTHER molecule in the
+        # batch at a fixed character position -- instead of across a molecule's own
+        # characters. A prediction then depends on which 31 molecules share its batch,
+        # at test time too. True fixes the axis and adds the positional embedding and
+        # padding mask that only become meaningful once it is fixed.
+        #
+        # Both rows exist because reproducing the reference number requires the first and
+        # knowing what the architecture is worth requires the second.
         model = MoLA(
             graph_dim=splits["train"][0].x.size(1),
             sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
             num_layers=num_layers,
+            positional_smiles=(config == "mola-fixed"), max_sm_len=100,
         ).to(device)
     elif is_hybrid:
         model = HybridMoLA(
