@@ -365,8 +365,16 @@ def main() -> None:
 
     print(f"\nDone: {step:,} steps in {(time.time() - start) / 60:.0f} min | best val {best:.4f}")
     print(f"Checkpoint: {ckpt_path}")
-    print(f"\nFine-tune with:\n  python crossmodal_model/benchmark/pretrained_ablation.py "
-          f"--configs {args.config} --init-checkpoint {ckpt_path}")
+    # The next command differs by architecture: only a hybrid checkpoint can initialize
+    # the generation half, and only a pretrained-backbone one belongs to a CONFIG row.
+    if args.arch == "hybrid":
+        print(f"\nNext:\n"
+              f"  python crossmodal_model/benchmark/pretrained_ablation.py "
+              f"--configs hybrid --init-checkpoint {ckpt_path}\n"
+              f"  python crossmodal_model/generation/train_pairs.py --init-encoder {ckpt_path}")
+    else:
+        print(f"\nFine-tune with:\n  python crossmodal_model/benchmark/pretrained_ablation.py "
+              f"--configs {args.config} --init-checkpoint {ckpt_path}")
     wandb_summary(run, {"best_val_loss": best, "steps": step,
                         "checkpoint": str(ckpt_path), "arch": args.arch})
     wandb_finish(run)
