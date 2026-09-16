@@ -65,6 +65,13 @@ from common.repro import (  # noqa: E402
     seed_everything,
     step_scheduler,
 )
+from common.wandb_utils import (  # noqa: E402
+    add_wandb_args,
+    wandb_finish,
+    wandb_init,
+    wandb_log,
+    wandb_summary,
+)
 from crossmodal_model.model.mola_pretrained import (  # noqa: E402
     CONFIGS,
     build_config,
@@ -112,6 +119,8 @@ def parse_args() -> argparse.Namespace:
                    help="recompute frozen backbones every epoch instead of caching them")
     p.add_argument("--out", type=str, default=str(ROOT / "results" / "pretrained_ablation.csv"))
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    add_wandb_args(p)
+    p.set_defaults(wandb_project="thesis-molnet-finetune")
     return p.parse_args()
 
 
@@ -153,7 +162,7 @@ def load_split(dataset: str, hybrid: bool = False,
     return out, char_vocab
 
 
-def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
+def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str, float]:
     seed_everything(seed, deterministic=False)
     device = args.device
     start = time.time()
@@ -294,11 +303,22 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
 
     run = (lambda split, train: epoch_cached(cached[split], train)) if cached is not None         else (lambda split, train: epoch(loaders[split], train))
 
+    # One wandb run per grid cell, all sharing a group: nine scattered runs would be
+    # unreadable, and a single run cannot hold nine separate loss curves.
+    tag = "pretrained" if args.init_checkpoint else "scratch"
+    wb = wandb_init(args, config={**vars(args), "dataset": dataset, "config": config,
+                                  "seed": seed, "pretrained": bool(args.init_checkpoint)},
+                    name=f"{dataset}_{config}_{tag}_s{seed}", group=group,
+                    tags=[dataset, config, tag])
+
     best_rmse, best_epoch, best_state, stale = float("inf"), 0, None, 0
     for ep in range(1, args.epochs + 1):
-        run("train", True)
+        tr = run("train", True)
         val = run("valid", False)
         step_scheduler(scheduler, val["rmse"])
+        wandb_log(wb, {"train/rmse": tr["rmse"], "train/loss": tr["loss"],
+                       "val/rmse": val["rmse"], "val/mae": val["mae"], "val/r2": val["r2"],
+                       "lr": optimizer.param_groups[0]["lr"]}, step=ep)
         if val["rmse"] < best_rmse:
             best_rmse, best_epoch, stale = val["rmse"], ep, 0
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
@@ -310,6 +330,10 @@ def run_one(dataset: str, config: str, seed: int, args) -> Dict[str, float]:
     if best_state is not None:
         model.load_state_dict(best_state)
     test = run("test", False)
+    wandb_summary(wb, {"test_rmse": test["rmse"], "test_mae": test["mae"],
+                       "test_r2": test["r2"], "best_epoch": best_epoch,
+                       "n_trainable": n_trainable, "pretrained": bool(args.init_checkpoint)})
+    wandb_finish(wb)
     return {
         "dataset": dataset, "config": config, "seed": seed,
         "pretrained": bool(args.init_checkpoint),
@@ -325,13 +349,15 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not out_path.exists()
 
+    group = (args.wandb_group
+             or f"molnet-{'pretrained' if args.init_checkpoint else 'scratch'}")
     rows: List[Dict[str, float]] = []
     for dataset in args.datasets:
         for config in args.configs:
             for seed in args.seeds:
                 print(f"\n=== {dataset} | {config} | seed {seed} ===", flush=True)
                 try:
-                    row = run_one(dataset, config, seed, args)
+                    row = run_one(dataset, config, seed, args, group)
                 except Exception as exc:  # one dead cell must not lose the rest of the grid
                     print(f"  FAILED: {type(exc).__name__}: {exc}", flush=True)
                     continue

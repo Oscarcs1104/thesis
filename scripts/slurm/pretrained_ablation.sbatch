@@ -20,6 +20,8 @@
 #   DATASETS=esol SEEDS=2025 sbatch scripts/slurm/pretrained_ablation.sbatch
 # mkdir -p results/logs before the first submit -- SLURM opens the log files first.
 
+# WANDB=1 logs to Weights & Biases; WANDB_MODE=offline if the node has no network.
+
 #SBATCH --job-name=thesis-finetune
 #SBATCH --account=mol_thesis
 #SBATCH --partition=gpu-cvail01
@@ -40,6 +42,16 @@ export TOKENIZERS_PARALLELISM=false
 
 python -c "import torch; print('GPU:', torch.cuda.get_device_name(0), '| VRAM %.0f GB' % (torch.cuda.get_device_properties(0).total_memory/1e9))"
 
+# Weights & Biases: WANDB=1 turns it on, WANDB_MODE=offline records locally when the
+# compute node has no outbound network (sync afterwards with `wandb sync wandb/offline-*`).
+# WANDB_API_KEY must be exported or `wandb login` run once on the login node.
+WANDB_FLAGS=""
+if [[ "${WANDB:-0}" == "1" ]]; then
+  WANDB_FLAGS="--use-wandb"
+  [[ -n "${WANDB_GROUP:-}" ]] && WANDB_FLAGS="$WANDB_FLAGS --wandb-group $WANDB_GROUP"
+  [[ -n "${WANDB_ENTITY:-}" ]] && WANDB_FLAGS="$WANDB_FLAGS --wandb-entity $WANDB_ENTITY"
+fi
+
 INIT_FLAG=""
 if [[ -n "${INIT:-}" ]]; then
   [[ -f "$INIT" ]] || { echo "INIT=$INIT does not exist"; exit 1; }
@@ -51,4 +63,5 @@ python crossmodal_model/benchmark/pretrained_ablation.py \
     --configs ${CONFIGS:-hybrid} \
     --seeds ${SEEDS:-2025 2026 2027} \
     --out "${OUT:-results/pretrained_ablation.csv}" \
-    $INIT_FLAG
+    $INIT_FLAG \
+    $WANDB_FLAGS

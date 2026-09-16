@@ -50,6 +50,13 @@ from torch_geometric.data import Dataset as GeomDataset  # noqa: E402
 from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
 
 from common.repro import seed_everything  # noqa: E402
+from common.wandb_utils import (  # noqa: E402
+    add_wandb_args,
+    wandb_finish,
+    wandb_init,
+    wandb_log,
+    wandb_summary,
+)
 from crossmodal_model.generation.pair_data import MoleculeGraphCache, build_char_vocab, cache_name  # noqa: E402
 from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
 from crossmodal_model.model.mola_pretrained import CONFIGS, build_config  # noqa: E402
@@ -119,6 +126,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rebuild-cache", action="store_true")
     p.add_argument("--out-dir", type=str, default="checkpoints/pretrain_moses")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    add_wandb_args(p)
+    p.set_defaults(wandb_project="thesis-pretrain-moses")
     return p.parse_args()
 
 
@@ -160,6 +169,9 @@ def main() -> None:
         tag = args.config.replace("+", "_")
     run_name = f"{tag}_s{args.seed}"
     ckpt_path = out_dir / f"{run_name}.pt"
+
+    run = wandb_init(args, config=vars(args), name=run_name,
+                     group=f"pretrain-{args.arch}", tags=[args.arch, tag])
 
     if device.startswith("cuda"):
         props = torch.cuda.get_device_properties(0)
@@ -308,6 +320,9 @@ def main() -> None:
                       flush=True)
                 history.append({"step": step, "train_loss": loss.item(), **val})
                 best = min(best, val["loss"])
+                wandb_log(run, {"train/loss": loss.item(), "val/loss": val["loss"],
+                                **{f"val/rmse_{k}": val[k] for k in PROPERTIES},
+                                "lr": optimizer.param_groups[0]["lr"]}, step=step)
 
             if time.time() - last_ckpt > args.ckpt_every_min * 60 or step == args.max_steps:
                 torch.save({
@@ -326,6 +341,9 @@ def main() -> None:
     print(f"Checkpoint: {ckpt_path}")
     print(f"\nFine-tune with:\n  python crossmodal_model/benchmark/pretrained_ablation.py "
           f"--configs {args.config} --init-checkpoint {ckpt_path}")
+    wandb_summary(run, {"best_val_loss": best, "steps": step,
+                        "checkpoint": str(ckpt_path), "arch": args.arch})
+    wandb_finish(run)
     (out_dir / f"{run_name}_history.json").write_text(
         json.dumps({"config": args.config, "history": history}, indent=2), encoding="utf-8")
 

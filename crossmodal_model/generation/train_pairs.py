@@ -34,6 +34,13 @@ if str(ROOT) not in sys.path:
 from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
 
 from common.repro import seed_everything  # noqa: E402
+from common.wandb_utils import (  # noqa: E402
+    add_wandb_args,
+    wandb_finish,
+    wandb_init,
+    wandb_log,
+    wandb_summary,
+)
 from crossmodal_model.generation.conditional_decoder import ConditionalMoleculeGenerator  # noqa: E402
 from crossmodal_model.generation.pair_data import build_pair_datasets  # noqa: E402
 from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
@@ -76,6 +83,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--out-dir", type=str, default="checkpoints/pairs")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    add_wandb_args(p)
+    p.set_defaults(wandb_project="thesis-generation-pairs")
     return p.parse_args()
 
 
@@ -106,6 +115,10 @@ def main() -> None:
     out_dir = ROOT / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = out_dir / f"{run_name}.pt"
+
+    # Grouped by ablation arm so the three show up on one chart, which is the figure.
+    run = wandb_init(args, config=vars(args), name=run_name, group="pairs-ablation",
+                     tags=[arm, "pretrained-encoder" if args.init_encoder else "from-scratch"])
 
     if device.startswith("cuda"):
         props = torch.cuda.get_device_properties(0)
@@ -237,6 +250,9 @@ def main() -> None:
                       f"{rate:.1f} it/s | eta {eta / 60:.0f} min", flush=True)
                 history.append({"step": step, "train_loss": loss.item(), **val})
                 best_val = min(best_val, val["loss"])
+                wandb_log(run, {"train/loss": loss.item(), "val/loss": val["loss"],
+                                "val/token_acc": val["token_acc"],
+                                "lr": optimizer.param_groups[0]["lr"]}, step=step)
 
             # Checkpoint on a wall-clock timer, not a step count: a job lost at hour 4
             # to a node failure should cost thirty minutes, not the whole arm.
@@ -252,6 +268,9 @@ def main() -> None:
     elapsed = time.time() - start
     print(f"\nDone: {step:,} steps in {elapsed / 60:.0f} min | best val loss {best_val:.4f}")
     print(f"Checkpoint: {ckpt_path}")
+    wandb_summary(run, {"best_val_loss": best_val, "arm": arm, "steps": step,
+                        "params": n_params, "checkpoint": str(ckpt_path)})
+    wandb_finish(run)
     (out_dir / f"{run_name}_history.json").write_text(
         json.dumps({"arm": arm, "params": n_params, "elapsed_s": elapsed, "history": history}, indent=2),
         encoding="utf-8",

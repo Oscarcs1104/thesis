@@ -23,6 +23,8 @@
 #
 # mkdir -p results/logs before the first submit -- SLURM opens the log files first.
 
+# WANDB=1 logs to Weights & Biases; WANDB_MODE=offline if the node has no network.
+
 #SBATCH --job-name=thesis-pairs
 #SBATCH --account=mol_thesis
 #SBATCH --partition=gpu-cvail01
@@ -40,6 +42,16 @@ mkdir -p results/logs
 source "${THESIS_VENV:-$HOME/venvs/thesis}/bin/activate"
 export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
+
+# Weights & Biases: WANDB=1 turns it on, WANDB_MODE=offline records locally when the
+# compute node has no outbound network (sync afterwards with `wandb sync wandb/offline-*`).
+# WANDB_API_KEY must be exported or `wandb login` run once on the login node.
+WANDB_FLAGS=""
+if [[ "${WANDB:-0}" == "1" ]]; then
+  WANDB_FLAGS="--use-wandb"
+  [[ -n "${WANDB_GROUP:-}" ]] && WANDB_FLAGS="$WANDB_FLAGS --wandb-group $WANDB_GROUP"
+  [[ -n "${WANDB_ENTITY:-}" ]] && WANDB_FLAGS="$WANDB_FLAGS --wandb-entity $WANDB_ENTITY"
+fi
 
 case "${ARM:-graph+smiles}" in
   graph+smiles) FLAGS="" ;;
@@ -63,4 +75,5 @@ python crossmodal_model/generation/train_pairs.py \
     --batch-size "${BATCH:-256}" \
     --seed "${SEED:-2025}" \
     --num-workers 6 \
-    $FLAGS
+    $FLAGS \
+    $WANDB_FLAGS
