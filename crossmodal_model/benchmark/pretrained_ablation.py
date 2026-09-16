@@ -98,7 +98,8 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 2+2 featurization and have no character-level SMILES branch.
 ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola", "mola-fixed")
 
-CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "rmse", "mae", "nrmse", "r2",
+CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "n_pool",
+              "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
 
 
@@ -546,6 +547,10 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         # protocols are not comparable, and without this the CSV cannot say which is which.
         "split_protocol": (f"resplit:{args.split_strategy}" if args.resplit_per_seed
                            else "frozen"),
+        # How many molecules this row was measured over. Dropping the InChIKey merge took
+        # ESOL from 1117 to 1128, and rows from the two are a different benchmark; without
+        # this the CSVs look alike and get averaged together.
+        "n_pool": sum(len(v) for v in splits.values()),
         "rmse": test["rmse"], "mae": test["mae"], "nrmse": test["nrmse"], "r2": test["r2"],
         "best_epoch": best_epoch, "n_params": n_params, "n_trainable": n_trainable,
         "elapsed_s": time.time() - start,

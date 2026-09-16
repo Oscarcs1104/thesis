@@ -58,12 +58,17 @@ def predictive() -> bool:
     # Rows measured on a frozen partition and on per-seed partitions answer different
     # questions and must not be pooled: the first has a spread covering initialisation
     # only, the second covers the partition too, and their means are not comparable.
-    group_keys = ["dataset"]
-    if "split_protocol" in df.columns and df["split_protocol"].nunique() > 1:
-        group_keys.append("split_protocol")
+    # config FIRST, and not optional. Averaging hybrid with mola and mola-fixed into one
+    # "desde cero" row produced an n of 18 and three numbers that meant nothing: they
+    # were the mean of three different architectures. Any column that distinguishes runs
+    # has to split the table, never be averaged over.
+    group_keys = ["dataset", "config"]
+    for extra in ("split_protocol", "n_pool"):
+        if extra in df.columns and df[extra].nunique() > 1:
+            group_keys.append(extra)
     for keys, g in df.groupby(group_keys):
-        dataset = keys if isinstance(keys, str) else " / ".join(map(str, keys))
-        print(f"\n  {dataset}")
+        title = " / ".join(str(k) for k in (keys if isinstance(keys, tuple) else (keys,)))
+        print(f"\n  {title}")
         print(f"    {'fila':<22} {'RMSE':>16} {'MAE':>9} {'R2':>8} {'n':>3}")
         rows = {}
         for row_key, gg in g.groupby(key):
