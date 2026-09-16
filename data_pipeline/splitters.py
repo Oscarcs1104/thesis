@@ -167,8 +167,14 @@ def deepchem_random_split_subsets(
                   On ESOL's 1117 molecules that alone is valid/test = 112/112 here
                   against 111/113 there.
 
-    VERIFY ONCE against a real DeepChem run before relying on the identity: compare a
-    dumped test.csv for one seed. The algorithm is reproduced from DeepChem's documented
+    Identical partitions also require an identical pool, and that is where the first
+    attempt to verify this failed: the reference test.csv held 113 ESOL molecules where
+    this gives 112, because it was drawn from the raw 1128 rather than the 1117 that
+    remain after merging duplicate InChIKeys. The splitter itself is still neither
+    confirmed nor refuted -- checking it needs a run over the same pool.
+
+    So: VERIFY ONCE against a real DeepChem run on a pool of known size before claiming
+    the partitions match. The algorithm is reproduced from DeepChem's documented
     behaviour, and this file cannot check itself.
     """
     total = frac_train + frac_val + frac_test
