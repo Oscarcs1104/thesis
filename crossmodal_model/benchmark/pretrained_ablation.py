@@ -200,35 +200,46 @@ def load_split_mola(dataset: str, seed: Optional[int], strategy: str = "deepchem
     DeepChem is imported here and nowhere else. It pulls TensorFlow in eagerly (see
     scripts/verify_splitter.py), so it stays out of every path that does not need it.
     """
-    try:
-        import deepchem as dc
-    except Exception as exc:  # noqa: BLE001 -- the cause matters more than the type
-        raise SystemExit(
-            f"--configs mola needs DeepChem for dc.feat.MolGraphConvFeaturizer "
-            f"({type(exc).__name__}: {exc}).\n"
-            f"  pip install deepchem tensorflow-cpu\n"
-            f"DeepChem 2.x imports TensorFlow eagerly even to reach a featurizer that "
-            f"never uses it; cpu, since nothing here touches a GPU."
-        )
+    from scripts.featurize_molgraphconv import pool_digest
     from data_pipeline.splitters import split_dataset
 
     cfg = DATASETS[dataset]
     csv_dir = ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
     pool = pd.concat([pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")],
                      ignore_index=True)
-    smiles = pool["smiles"].astype(str).tolist()
-    targets = pool[cfg["target_col"]].astype(float).tolist()
+    raw_smiles = pool["smiles"].astype(str).tolist()
+    raw_targets = pool[cfg["target_col"]].astype(float).tolist()
 
-    featurizer = dc.feat.MolGraphConvFeaturizer()
-    feats = featurizer.featurize(smiles)
-    keep = [i for i, f in enumerate(feats)
-            if hasattr(f, "node_features") and hasattr(f, "edge_index")]
-    if len(keep) != len(smiles):
+    # The features come from a file written once by scripts/featurize_molgraphconv.py in
+    # an environment of its own. DeepChem pins numpy and protobuf and pulls TensorFlow in
+    # eagerly; installing it beside a working torch/PyG stack risks downgrading numpy
+    # under compiled wheels, which is a poor trade for one featurizer.
+    cache = csv_dir / "molgraphconv.npz"
+    if not cache.exists():
+        raise SystemExit(
+            f"--configs {dataset}/mola needs {cache}, which does not exist.\n"
+            f"  In an environment with deepchem (not this one):\n"
+            f"    python scripts/featurize_molgraphconv.py\n"
+            f"It writes the file next to the CSVs; nothing has to be copied."
+        )
+    z = np.load(cache)
+    want = pool_digest(raw_smiles, raw_targets)
+    if str(z["digest"]) != want:
+        raise SystemExit(
+            f"{cache.name} was built from different split CSVs than the ones on disk "
+            f"(its {str(z['digest'])[:12]}, theirs {want[:12]}).\n"
+            f"  Rerun scripts/featurize_molgraphconv.py where deepchem is installed."
+        )
+    if int(z["n_pool"]) != len(raw_smiles):
+        raise SystemExit(f"{cache.name} was built over {int(z['n_pool'])} molecules, the "
+                         f"pool on disk holds {len(raw_smiles)}")
+
+    smiles = [str(v) for v in z["smiles"]]
+    targets = [float(v) for v in z["y"]]
+    node_ptr, edge_ptr = z["node_ptr"], z["edge_ptr"]
+    if len(smiles) != len(raw_smiles):
         print(f"    [{dataset}] MolGraphConvFeaturizer dropped "
-              f"{len(smiles) - len(keep)}/{len(smiles)} before splitting")
-    smiles = [smiles[i] for i in keep]
-    targets = [targets[i] for i in keep]
-    feats = [feats[i] for i in keep]
+              f"{len(raw_smiles) - len(smiles)}/{len(raw_smiles)} before splitting")
 
     if seed is None:
         raise SystemExit("--configs mola requires --resplit-per-seed: its pool is built "
@@ -251,9 +262,10 @@ def load_split_mola(dataset: str, seed: Optional[int], strategy: str = "deepchem
     for name, idx in parts.items():
         items = []
         for i in idx:
-            g = feats[i]
-            d = Data(x=torch.tensor(g.node_features, dtype=torch.float32),
-                     edge_index=torch.tensor(g.edge_index, dtype=torch.long),
+            a0, a1 = int(node_ptr[i]), int(node_ptr[i + 1])
+            e0, e1 = int(edge_ptr[i]), int(edge_ptr[i + 1])
+            d = Data(x=torch.from_numpy(z["x"][a0:a1].copy()),
+                     edge_index=torch.from_numpy(z["edge_index"][:, e0:e1].astype(np.int64)),
                      y=torch.tensor([targets[i]], dtype=torch.float32))
             ids = [vocab.get(c, 0) for c in smiles[i][:max_sm_len]]
             ids.extend([0] * (max_sm_len - len(ids)))
