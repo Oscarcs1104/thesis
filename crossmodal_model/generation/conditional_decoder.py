@@ -157,10 +157,23 @@ class ConditionalMoleculeGenerator(nn.Module):
         pad_idx = vocab["pad_idx"]
         temperature = float(temperature) if float(temperature) > 0 else 1.0
 
+        # The memory does not depend on what has been decoded so far, so it is built once
+        # instead of once per token. Going through guided_logits re-ran the graph network
+        # and the SMILES transformer at every one of max_len steps -- the encoder is most
+        # of the model, so that was most of the sampling cost, spent recomputing an
+        # identical tensor.
+        mem_c, pad_c = self._memory(data, cond_bins, force_null=False)
+        mem_u, pad_u = ((None, None) if guidance == 1.0
+                        else self._memory(data, cond_bins, force_null=True))
+
         tokens = torch.full((batch_size, 1), start_idx, dtype=torch.long, device=device)
         finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
         for _ in range(max_len):
-            logits = self.guided_logits(data, tokens, cond_bins, guidance=guidance)[:, -1] / temperature
+            logits = self.decoder(mem_c, pad_c, tokens)[:, -1]
+            if mem_u is not None:
+                uncond = self.decoder(mem_u, pad_u, tokens)[:, -1]
+                logits = uncond + guidance * (logits - uncond)
+            logits = logits / temperature
             if sample:
                 next_ids = torch.multinomial(torch.softmax(logits, dim=-1), num_samples=1).squeeze(-1)
             else:

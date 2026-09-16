@@ -284,6 +284,10 @@ def main() -> None:
             if time.time() - last_ckpt > args.ckpt_every_min * 60 or step == args.max_steps:
                 torch.save({
                     "model_state_dict": model.state_dict(), "step": step, "args": vars(args),
+                    # Explicit, because --init-encoder overrides these and vars(args)
+                    # keeps the command line's value: anything rebuilding the model from
+                    # args alone would get the wrong width and fail at load.
+                    "hidden_dim": hidden_dim, "num_layers": num_layers,
                     "arm": arm, "vocab": vocab, "char_vocab": cache.char_vocab,
                     "binners": {k: v.state_dict() for k, v in binners.items()},
                     "history": history,

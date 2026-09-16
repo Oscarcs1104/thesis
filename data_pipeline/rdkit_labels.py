@@ -40,7 +40,13 @@ if str(ROOT) not in sys.path:
 PROPERTIES = ["logp", "tpsa", "qed", "mw"]
 
 
-def _label_one(smiles: str) -> Optional[Tuple[float, float, float, float]]:
+def label_one(smiles: str) -> Optional[Tuple[float, float, float, float]]:
+    """The four oracle values for one SMILES, or None if RDKit refuses it.
+
+    Public because eval_oracle.py scores generated molecules with it. Sharing the
+    function rather than reimplementing the four calls is the point: a change here
+    cannot leave evaluation measuring a different quantity than the corpus labels.
+    """
     from rdkit import Chem, RDLogger
 
     RDLogger.DisableLog("rdApp.*")
@@ -86,12 +92,12 @@ def main() -> None:
     results: List[Optional[Tuple[float, ...]]] = []
     if args.workers <= 1:
         for i, s in enumerate(smiles, 1):
-            results.append(_label_one(s))
+            results.append(label_one(s))
             if i % 100_000 == 0:
                 print(f"  {i}/{len(smiles)} ({time.time() - start:.0f}s)", flush=True)
     else:
         with mp.Pool(args.workers) as pool:
-            for i, r in enumerate(pool.imap(_label_one, smiles, chunksize=args.chunksize), 1):
+            for i, r in enumerate(pool.imap(label_one, smiles, chunksize=args.chunksize), 1):
                 results.append(r)
                 if i % 100_000 == 0:
                     print(f"  {i}/{len(smiles)} ({time.time() - start:.0f}s)", flush=True)
