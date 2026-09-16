@@ -58,8 +58,17 @@ if [[ -n "${INIT:-}" ]]; then
   INIT_FLAG="--init-checkpoint $INIT"
 fi
 
+# RESPLIT=1 repartitions the recombined pool with each run's own seed instead of reading
+# the frozen split. The spread across seeds then covers the partition as well as the
+# initialisation, and the partition is the larger term by an order of magnitude. Required
+# to compare against numbers measured over resampled partitions. Rows from the two
+# protocols must never be averaged together; the CSV records which produced each one.
+RESPLIT_FLAG=""
+[[ "${RESPLIT:-0}" == "1" ]] && RESPLIT_FLAG="--resplit-per-seed"
+
 python crossmodal_model/benchmark/pretrained_ablation.py \
     --datasets ${DATASETS:-esol freesolv lipo} \
+    $RESPLIT_FLAG \
     --configs ${CONFIGS:-hybrid} \
     --seeds ${SEEDS:-2025 2026 2027} \
     --out "${OUT:-results/pretrained_ablation.csv}" \

@@ -55,12 +55,19 @@ def predictive() -> bool:
     # to read in a table, so it is spelled out.
     label = {True: "preentrenado (MOSES)", False: "desde cero",
              "init": "preentrenado (MOSES)", "scratch": "desde cero"}
-    for dataset, g in df.groupby("dataset"):
+    # Rows measured on a frozen partition and on per-seed partitions answer different
+    # questions and must not be pooled: the first has a spread covering initialisation
+    # only, the second covers the partition too, and their means are not comparable.
+    group_keys = ["dataset"]
+    if "split_protocol" in df.columns and df["split_protocol"].nunique() > 1:
+        group_keys.append("split_protocol")
+    for keys, g in df.groupby(group_keys):
+        dataset = keys if isinstance(keys, str) else " / ".join(map(str, keys))
         print(f"\n  {dataset}")
         print(f"    {'fila':<22} {'RMSE':>16} {'MAE':>9} {'R2':>8} {'n':>3}")
         rows = {}
         for row_key, gg in g.groupby(key):
-            rows[row_key] = gg["rmse"]
+            rows[row_key] = gg.set_index("seed")["rmse"]
             print(f"    {label.get(row_key, str(row_key)):<22} "
                   f"{gg['rmse'].mean():>8.4f} +/- {gg['rmse'].std():<5.4f}"
                   f" {gg['mae'].mean():>8.4f} {gg['r2'].mean():>8.4f} {len(gg):>3}")
@@ -68,15 +75,31 @@ def predictive() -> bool:
         # so it is stated rather than left to the reader to eyeball two columns.
         if len(rows) == 2:
             (ka, a), (kb, b) = rows.items()
-            gap = a.mean() - b.mean()
-            spread = (a.std() + b.std()) / 2
+            shared = a.index.intersection(b.index)
+            # The two rows run the same seeds, and under --resplit-per-seed that means the
+            # same partitions. Comparing independent means throws that pairing away and
+            # charges the partition variance to the error bar, where it cancels exactly:
+            # under resplitting it is an order of magnitude larger than the effect, so the
+            # unpaired test can call a real difference noise. Pair when the seeds line up.
+            paired = len(shared) == len(a) == len(b) and len(shared) > 1
+            if paired:
+                d = (a.loc[shared] - b.loc[shared])
+                gap, spread, how = d.mean(), d.std(), "pareada por semilla"
+            else:
+                gap = a.mean() - b.mean()
+                spread = (a.std() + b.std()) / 2
+                how = "entre medias (semillas no emparejadas)"
             better = label.get(ka if gap < 0 else kb, "?")
             if abs(gap) < spread:
-                print(f"      -> diferencia {abs(gap):.4f}, dentro de la dispersion entre "
-                      f"semillas ({spread:.4f}): no es un resultado")
+                print(f"      -> diferencia {abs(gap):.4f}, dentro de la dispersion "
+                      f"{how} ({spread:.4f}): no es un resultado")
             else:
-                print(f"      -> {better} mejor por {abs(gap):.4f} RMSE, "
-                      f"{abs(gap) / max(spread, 1e-9):.1f}x la dispersion entre semillas")
+                # A ratio against a spread near zero is a number with no information in
+                # it; say the spread vanished instead of printing seven digits of it.
+                ratio = abs(gap) / spread if spread > 1e-6 else float("inf")
+                size = ">100x" if ratio > 100 else f"{ratio:.1f}x"
+                print(f"      -> {better} mejor por {abs(gap):.4f} RMSE, {size} la "
+                      f"dispersion {how} ({spread:.4f})")
     print("\n  RMSE menor es mejor. La desviacion es sobre semillas. Con 3 semillas esto es")
     print("  una comprobacion de cordura, no una prueba estadistica: sirve para descartar")
     print("  diferencias que no existen, no para afirmar las que si.")

@@ -88,7 +88,7 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 2+2 featurization and have no character-level SMILES branch.
 ALL_CONFIGS = tuple(CONFIGS) + ("hybrid",)
 
-CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "rmse", "mae", "nrmse", "r2",
+CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
 
 
@@ -107,6 +107,13 @@ def parse_args() -> argparse.Namespace:
                         "SMILES branch's feedforward block so the modality ablation "
                         "compares modalities rather than capacities. Overridden by "
                         "--init-checkpoint, which fixes the shape")
+    p.add_argument("--resplit-per-seed", action="store_true",
+                   help="repartition the recombined pool with each run's own seed "
+                        "instead of reading the frozen split. The spread across seeds "
+                        "then covers the partition as well as the initialisation, which "
+                        "is the larger term: repartitioning ESOL moves an unchanged "
+                        "model from 0.485 to 0.663 RMSE. Required to compare against "
+                        "numbers someone else measured over resampled partitions")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--grad-clip", type=float, default=1.0)
@@ -129,9 +136,38 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resplit_pool(dataset: str, seed: int, strategy: str = "random"):
+    """Recombine the three frozen CSVs and repartition them with this run's seed.
+
+    The frozen split answers "is this model better than that model", since every row of
+    the table sees identical data. It cannot answer "is this number good", because one
+    partition of 113 ESOL test molecules is a single draw: repartitioning the same data
+    moves the RMSE of an unchanged model from 0.485 to 0.663. A table built on one
+    partition reports a spread that only covers weight initialisation and hides the
+    larger term, and its mean cannot be compared against a number someone else measured
+    over resampled partitions.
+
+    So both are kept. --resplit-per-seed turns this on; off, the frozen split stands.
+    """
+    from data_pipeline.splitters import split_dataset
+
+    cfg = DATASETS[dataset]
+    csv_dir = ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
+    pool = pd.concat([pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")],
+                     ignore_index=True)
+    smiles = pool["smiles"].astype(str).tolist()
+    tr, va, te = split_dataset(range(len(pool)), strategy, 0.8, 0.1, 0.1, seed,
+                               smiles_list=smiles)
+    parts = {"train": list(tr.indices), "valid": list(va.indices), "test": list(te.indices)}
+    print(f"    [{dataset} seed {seed}] repartitioned: "
+          + " ".join(f"{k}={len(v)}" for k, v in parts.items()))
+    return {k: pool.iloc[v].reset_index(drop=True) for k, v in parts.items()}
+
+
 def load_split(dataset: str, hybrid: bool = False,
-               char_vocab: Optional[Dict[str, int]] = None, max_sm_len: int = 100):
-    """Featurize a dataset's frozen scaffold split.
+               char_vocab: Optional[Dict[str, int]] = None, max_sm_len: int = 100,
+               resplit_seed: Optional[int] = None):
+    """Featurize a dataset's split, frozen on disk or repartitioned for this seed.
 
     The schema follows the encoder: 'hybrid' consumes OGB 9+3 plus character indices for
     its SMILES branch, the pretrained-backbone rows the Hu et al. 2+2 schema their GIN
@@ -140,7 +176,10 @@ def load_split(dataset: str, hybrid: bool = False,
     """
     cfg = DATASETS[dataset]
     csv_dir = ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
-    raw = {s: pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")}
+    if resplit_seed is not None:
+        raw = resplit_pool(dataset, resplit_seed)
+    else:
+        raw = {s: pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")}
 
     if hybrid and char_vocab is None:
         # Only when there is no pretrained checkpoint to inherit from. Built over all
@@ -196,7 +235,8 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
-    splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab)
+    splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab,
+                                    resplit_seed=seed if args.resplit_per_seed else None)
     train_y = torch.tensor([float(d.y) for d in splits["train"]])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
     target_std = float(train_y.std())
@@ -357,6 +397,9 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
     return {
         "dataset": dataset, "config": config, "seed": seed,
         "pretrained": bool(args.init_checkpoint),
+        # Which partition protocol produced this row. Two rows measured under different
+        # protocols are not comparable, and without this the CSV cannot say which is which.
+        "split_protocol": "resplit-per-seed" if args.resplit_per_seed else "frozen",
         "rmse": test["rmse"], "mae": test["mae"], "nrmse": test["nrmse"], "r2": test["r2"],
         "best_epoch": best_epoch, "n_params": n_params, "n_trainable": n_trainable,
         "elapsed_s": time.time() - start,
