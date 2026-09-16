@@ -67,18 +67,21 @@ class MosesRegressionDataset(GeomDataset):
     """Graph (Hu et al. schema) + raw SMILES for the LM + the four standardized targets."""
 
     def __init__(self, cache: MoleculeGraphCache, smiles: List[str],
-                 indices: np.ndarray, targets: np.ndarray) -> None:
+                 row_ids: np.ndarray, targets: np.ndarray) -> None:
         super().__init__()
         self.cache = cache
         self.smiles = smiles
-        self.indices = indices
+        # NOT self.indices: PyG's Dataset defines indices() as a method, and shadowing it
+        # with an array makes its own __len__ call an ndarray. See
+        # tests/test_merge_integrity.py::test_dataset_attributes_do_not_shadow_pyg.
+        self.row_ids = row_ids
         self.targets = torch.from_numpy(targets.astype(np.float32))
 
     def len(self) -> int:
-        return len(self.indices)
+        return len(self.row_ids)
 
     def get(self, idx: int) -> Data:
-        i = int(self.indices[idx])
+        i = int(self.row_ids[idx])
         d = self.cache.get(i)
         d.smiles = self.smiles[i]
         d.y = self.targets[idx].unsqueeze(0)

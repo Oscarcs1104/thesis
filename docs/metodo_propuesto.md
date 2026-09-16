@@ -280,12 +280,25 @@ valores, sino en la representación que el encoder desarrolla al producirlos.
 ### 6.1 Estandarización de objetivos
 
 Las cuatro propiedades se estandarizan con la media y la desviación del conjunto de
-entrenamiento. Sin ello, un error cuadrático medio sin ponderar estaría dominado por el
-peso molecular, cuya desviación típica se mide en decenas de daltons, frente al QED, cuya
-escala completa es el intervalo [0, 1]; el modelo resultante sería un regresor de MW con
-tres adornos. Los valores exactos de media y desviación por propiedad quedan registrados
-en `labels_meta.json` y se reportan junto a los resultados. El RMSE de validación se reporta de
-vuelta en las unidades propias de cada propiedad.
+entrenamiento, medidas sobre el corpus completo:
+
+| Propiedad | media | desv. típica |
+|---|---:|---:|
+| logP | 2,446 | 0,927 |
+| TPSA | 65,797 | 18,089 |
+| QED | 0,806 | 0,095 |
+| MW | 307,361 | 27,995 |
+
+Sin estandarizar, un error cuadrático medio sin ponderar estaría dominado por el peso
+molecular —desviación típica de casi 28 daltons— frente al QED, cuya escala completa es el
+intervalo [0, 1] y cuya desviación es de 0,095; el modelo resultante sería un regresor de
+MW con tres adornos. El RMSE de validación se reporta de vuelta en las unidades propias de
+cada propiedad.
+
+Conviene no confundir esta tabla con la de §4: allí las desviaciones son las de los **Δ**
+entre pares, aquí las de los **valores absolutos**. Que la de MW casi coincida en ambas
+(27,679 frente a 27,995) es una coincidencia debida al estrecho rango de masas de MOSES, no
+una repetición de la misma cifra.
 
 ### 6.2 Configuración
 

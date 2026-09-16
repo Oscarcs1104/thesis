@@ -142,3 +142,51 @@ def test_graph_encoder_consumes_real_molecules():
     node_state, layer_states = enc(batch.x, batch.edge_index, batch.batch, edge_attr=batch.edge_attr)
     assert node_state.size(1) == HIDDEN
     assert layer_states[-1].shape == (4, HIDDEN)  # includes methane: 1 atom, 0 bonds
+
+
+def test_dataset_attributes_do_not_shadow_pyg():
+    """No Dataset subclass may assign over a name PyG's base class uses as a method.
+
+    This is not hypothetical. MosesRegressionDataset assigned self.indices, and PyG's
+    Dataset defines indices() as a method that its own __len__ calls -- so building a
+    DataLoader raised "'numpy.ndarray' object is not callable" after the job had already
+    spent its startup featurizing 1.94M molecules. The failure surfaces far from the
+    assignment, which is exactly why it is worth a test rather than care.
+    """
+    import ast
+
+    reserved = {
+        "indices", "len", "get", "data", "slices", "transform", "pre_transform",
+        "pre_filter", "raw_dir", "processed_dir", "raw_paths", "processed_paths",
+        "raw_file_names", "processed_file_names", "download", "process", "num_classes",
+        "num_features", "num_node_features", "num_edge_features", "index_select",
+        "shuffle", "to_datapipe",
+    }
+    sources = [
+        ROOT / "crossmodal_model" / "generation" / "pair_data.py",
+        ROOT / "crossmodal_model" / "generation" / "framework_data.py",
+        ROOT / "crossmodal_model" / "train" / "pretrain_moses.py",
+    ]
+
+    offenders = []
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            base_names = {getattr(b, "id", getattr(b, "attr", "")) for b in node.bases}
+            if not base_names & {"GeomDataset", "Dataset"}:
+                continue
+            assigned = {
+                t.attr
+                for n in ast.walk(node) if isinstance(n, ast.Assign)
+                for t in n.targets
+                if isinstance(t, ast.Attribute) and getattr(t.value, "id", "") == "self"
+            }
+            for name in sorted(assigned & reserved):
+                offenders.append(f"{path.name}::{node.name}.{name}")
+
+    assert not offenders, (
+        "these attributes shadow a PyG Dataset method and will break at DataLoader "
+        f"construction: {offenders}"
+    )
