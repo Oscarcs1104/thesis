@@ -51,6 +51,7 @@ from torch_geometric.loader import DataLoader as GeomDataLoader  # noqa: E402
 
 from common.repro import seed_everything  # noqa: E402
 from crossmodal_model.generation.pair_data import MoleculeGraphCache, build_char_vocab, cache_name  # noqa: E402
+from crossmodal_model.model.mola_hybrid import HybridMoLA  # noqa: E402
 from crossmodal_model.model.mola_pretrained import CONFIGS, build_config  # noqa: E402
 from data_pipeline.rdkit_labels import PROPERTIES  # noqa: E402
 
@@ -79,7 +80,17 @@ class MosesRegressionDataset(GeomDataset):
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--config", type=str, default="chemberta+gin", choices=list(CONFIGS))
+    p.add_argument("--arch", type=str, default="pretrained", choices=["pretrained", "hybrid"],
+                   help="'pretrained' fuses published backbones (Hu GIN + ChemBERTa/MoLFormer); "
+                        "'hybrid' is the thesis's own HybridMoLA, trained from scratch. Only the "
+                        "hybrid checkpoint can initialize the generation half -- it is the only "
+                        "one sharing that architecture, featurization and character vocabulary")
+    p.add_argument("--config", type=str, default="chemberta+gin", choices=list(CONFIGS),
+                   help="which backbones to fuse; ignored when --arch hybrid")
+    p.add_argument("--use-graph", dest="use_graph", action="store_true", default=True)
+    p.add_argument("--no-use-graph", dest="use_graph", action="store_false")
+    p.add_argument("--use-smiles", dest="use_smiles", action="store_true", default=True)
+    p.add_argument("--no-use-smiles", dest="use_smiles", action="store_false")
     p.add_argument("--corpus-dir", type=str, default="data/moses")
     p.add_argument("--max-steps", type=int, default=40000)
     p.add_argument("--batch-size", type=int, default=256)
@@ -141,7 +152,13 @@ def main() -> None:
     device = args.device
     out_dir = ROOT / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    run_name = f"{args.config.replace('+', '_')}_s{args.seed}"
+    if args.arch == "hybrid":
+        arm = ("graph+smiles" if args.use_graph and args.use_smiles
+               else "graph-only" if args.use_graph else "smiles-only")
+        tag = f"hybrid_{arm}"
+    else:
+        tag = args.config.replace("+", "_")
+    run_name = f"{tag}_s{args.seed}"
     ckpt_path = out_dir / f"{run_name}.pt"
 
     if device.startswith("cuda"):
@@ -157,18 +174,19 @@ def main() -> None:
 
     # The Hu et al. schema, kept in its own cache file: it is not interchangeable with
     # the OGB one the generation half uses.
-    cache_path = corpus_dir / cache_name("pretrain-gnn")
+    schema = "ogb" if args.arch == "hybrid" else "pretrain-gnn"
+    cache_path = corpus_dir / cache_name(schema)
     if cache_path.exists() and not args.rebuild_cache:
         cache = MoleculeGraphCache.load(cache_path)
         print(f"Loaded graph cache from {cache_path} ({len(cache):,} molecules)")
     else:
         cache = MoleculeGraphCache.build(smiles, build_char_vocab(smiles),
-                                         workers=args.num_workers * 2, schema="pretrain-gnn")
+                                         workers=args.num_workers * 2, schema=schema)
         cache.save(cache_path)
         print(f"Saved graph cache to {cache_path}")
-    if cache.schema != "pretrain-gnn":
-        raise SystemExit(f"cache at {cache_path} uses the {cache.schema!r} schema; the "
-                         f"pretrained GIN needs 'pretrain-gnn'. Pass --rebuild-cache.")
+    if cache.schema != schema:
+        raise SystemExit(f"cache at {cache_path} uses the {cache.schema!r} schema but "
+                         f"--arch {args.arch} needs {schema!r}. Pass --rebuild-cache.")
 
     usable = np.flatnonzero(np.isfinite(labels).all(axis=1) & cache.valid[:len(labels)])
     rng = np.random.default_rng(args.seed)
@@ -194,18 +212,30 @@ def main() -> None:
     train_loader = GeomDataLoader(train_ds, shuffle=True, drop_last=True, **loader_kwargs)
     val_loader = GeomDataLoader(val_ds, shuffle=False, **loader_kwargs)
 
-    model = build_config(
-        args.config, hidden_dim=args.hidden_dim, output_dim=len(PROPERTIES),
-        num_layers=args.num_layers, lm_freeze=False, gin_freeze=False,
-    ).to(device)
-    restrict_lm_to_top_n(model, args.lm_top_n)
+    if args.arch == "hybrid":
+        model = HybridMoLA(
+            sm_vocab_size=len(cache.char_vocab), hidden_dim=args.hidden_dim,
+            output_dim=len(PROPERTIES), num_layers=args.num_layers,
+            positional_smiles=True, max_sm_len=cache.sm.shape[1],
+            use_graph=args.use_graph, use_smiles=args.use_smiles,
+        ).to(device)
+        print(f"  arch=hybrid ({tag}), everything from scratch")
+    else:
+        model = build_config(
+            args.config, hidden_dim=args.hidden_dim, output_dim=len(PROPERTIES),
+            num_layers=args.num_layers, lm_freeze=False, gin_freeze=False,
+        ).to(device)
+        restrict_lm_to_top_n(model, args.lm_top_n)
 
-    backbone_names = tuple(n for n in ("gin.", "lm.backbone.") if True)
+    # Two rates only when there is a pretrained backbone to protect. With everything
+    # from scratch a split would just slow half the model down for no reason.
+    backbone_names = ("gin.", "lm.backbone.")
     backbone_params, head_params = [], []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        (backbone_params if name.startswith(backbone_names) else head_params).append(param)
+        is_backbone = args.arch != "hybrid" and name.startswith(backbone_names)
+        (backbone_params if is_backbone else head_params).append(param)
     print(f"  trainable: {sum(p.numel() for p in backbone_params):,} backbone + "
           f"{sum(p.numel() for p in head_params):,} fusion/head")
 
@@ -282,6 +312,8 @@ def main() -> None:
             if time.time() - last_ckpt > args.ckpt_every_min * 60 or step == args.max_steps:
                 torch.save({
                     "model_state_dict": model.state_dict(), "config": args.config,
+                    "arch": args.arch, "char_vocab": cache.char_vocab, "schema": schema,
+                    "use_graph": args.use_graph, "use_smiles": args.use_smiles,
                     "step": step, "args": vars(args), "history": history,
                     # Needed by the fine-tune: without them the pretrained head predicts
                     # in standardized space and its outputs are meaningless.

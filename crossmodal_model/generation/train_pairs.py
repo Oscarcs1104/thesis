@@ -64,6 +64,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-use-graph", dest="use_graph", action="store_false")
     p.add_argument("--use-smiles", dest="use_smiles", action="store_true", default=True)
     p.add_argument("--no-use-smiles", dest="use_smiles", action="store_false")
+    p.add_argument("--init-encoder", type=str, default=None,
+                   help="HybridMoLA checkpoint from crossmodal_model/train/pretrain_moses.py "
+                        "--arch hybrid. Only the encoder is taken; the regression head it "
+                        "was pretrained with has no role here")
+    p.add_argument("--freeze-encoder", action="store_true",
+                   help="keep the pretrained encoder fixed. Weakens the claim from 'the fused "
+                        "encoder makes the decoder work' to 'a frozen pretrained encoder helps'")
     p.add_argument("--seed", type=int, default=2025)
     p.add_argument("--rebuild-cache", action="store_true")
     p.add_argument("--run-name", type=str, default=None)
@@ -129,12 +136,40 @@ def main() -> None:
         cond_dropout=args.cond_dropout, decoder_layers=args.decoder_layers,
         max_len=args.max_sm_len + 32,
     ).to(device)
+    if args.init_encoder:
+        ck = torch.load(args.init_encoder, map_location="cpu", weights_only=False)
+        if ck.get("arch") != "hybrid":
+            raise SystemExit(f"--init-encoder must be an --arch hybrid checkpoint, got "
+                             f"{ck.get('arch')!r}. The pretrained-backbone architectures use a "
+                             f"different featurization and character vocabulary.")
+        if ck.get("char_vocab") != cache.char_vocab:
+            raise SystemExit("the checkpoint's character vocabulary differs from this corpus's. "
+                             "The SMILES embedding rows would mean different characters.")
+        if (ck.get("use_graph"), ck.get("use_smiles")) != (args.use_graph, args.use_smiles):
+            raise SystemExit(f"checkpoint arm is graph={ck.get('use_graph')} "
+                             f"smiles={ck.get('use_smiles')}, this run is graph={args.use_graph} "
+                             f"smiles={args.use_smiles}. Each arm must load its own.")
+        enc = {k[len("encoder."):]: v for k, v in ck["model_state_dict"].items()
+               if k.startswith("encoder.")}
+        missing, unexpected = model.mola.encoder.load_state_dict(enc, strict=False)
+        if missing or unexpected:
+            raise SystemExit("encoder init did not load cleanly\n"
+                             f"  missing:    {list(missing)}\n"
+                             f"  unexpected: {list(unexpected)}")
+        print(f"  encoder initialized from {args.init_encoder} (step {ck.get('step')})")
+        if args.freeze_encoder:
+            for prm in model.mola.encoder.parameters():
+                prm.requires_grad = False
+            print("  encoder frozen")
+
     n_params = sum(p.numel() for p in model.parameters())
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"\narm={arm}  params={n_params:,}  budget={args.max_steps:,} steps "
           f"x batch {args.batch_size} = {args.max_steps * args.batch_size:,} examples")
 
     criterion = nn.CrossEntropyLoss(ignore_index=pad_idx)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
+    optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                                  lr=args.lr, weight_decay=args.weight_decay,
                                   fused=device.startswith("cuda"))
 
     def lr_at(step: int) -> float:
