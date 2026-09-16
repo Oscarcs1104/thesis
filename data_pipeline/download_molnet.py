@@ -105,6 +105,16 @@ def download_one(name: str, parent_dir: Path, split: str = "random",
     for part, idx in parts.items():
         df.iloc[idx][["smiles", "y"]].to_csv(csv_dir / f"{part}.csv", index=False)
 
+    # Which partition produced these files is not visible in them, and the answer changes
+    # what every downstream number means. Recording it turns "did I rerun this after the
+    # split changed?" from an inference about scaffold overlap into reading a file.
+    import json
+
+    (csv_dir / "split_meta.json").write_text(json.dumps({
+        "split": split, "seed": seed, "fracs": list(fracs), "n_molecules": int(len(df)),
+        "sizes": {k: len(v) for k, v in parts.items()},
+    }, indent=2), encoding="utf-8")
+
     print(
         f"[{name}] {len(df)} molecules ({n_merged} dup InChIKey merged) | "
         f"{split} split train/valid/test = {len(parts['train'])}/{len(parts['valid'])}/{len(parts['test'])} | "
