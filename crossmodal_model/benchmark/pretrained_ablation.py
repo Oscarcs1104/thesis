@@ -114,6 +114,13 @@ def parse_args() -> argparse.Namespace:
                         "is the larger term: repartitioning ESOL moves an unchanged "
                         "model from 0.485 to 0.663 RMSE. Required to compare against "
                         "numbers someone else measured over resampled partitions")
+    p.add_argument("--split-strategy", default="deepchem-random",
+                   choices=["deepchem-random", "random", "scaffold"],
+                   help="which partitioner --resplit-per-seed uses. deepchem-random "
+                        "reproduces dc.splits.RandomSplitter exactly, so on the same "
+                        "pool with the same seed the partition is identical to one "
+                        "drawn with DeepChem -- the comparison becomes molecule-for-"
+                        "molecule rather than only in distribution")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--grad-clip", type=float, default=1.0)
@@ -136,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def resplit_pool(dataset: str, seed: int, strategy: str = "random"):
+def resplit_pool(dataset: str, seed: int, strategy: str = "deepchem-random"):
     """Recombine the three frozen CSVs and repartition them with this run's seed.
 
     The frozen split answers "is this model better than that model", since every row of
@@ -177,7 +184,7 @@ def load_split(dataset: str, hybrid: bool = False,
     cfg = DATASETS[dataset]
     csv_dir = ROOT / "data" / "deepchem_molnet" / cfg["dir"] / "csv"
     if resplit_seed is not None:
-        raw = resplit_pool(dataset, resplit_seed)
+        raw = resplit_pool(dataset, resplit_seed, strategy=resplit_strategy)
     else:
         raw = {s: pd.read_csv(csv_dir / f"{s}.csv") for s in ("train", "valid", "test")}
 
@@ -236,7 +243,8 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
     splits, char_vocab = load_split(dataset, hybrid=is_hybrid, char_vocab=char_vocab,
-                                    resplit_seed=seed if args.resplit_per_seed else None)
+                                    resplit_seed=seed if args.resplit_per_seed else None,
+                                    resplit_strategy=args.split_strategy)
     train_y = torch.tensor([float(d.y) for d in splits["train"]])
     standardizer = TargetStandardizer(enabled=True).fit(train_y)
     target_std = float(train_y.std())
@@ -399,7 +407,8 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         "pretrained": bool(args.init_checkpoint),
         # Which partition protocol produced this row. Two rows measured under different
         # protocols are not comparable, and without this the CSV cannot say which is which.
-        "split_protocol": "resplit-per-seed" if args.resplit_per_seed else "frozen",
+        "split_protocol": (f"resplit:{args.split_strategy}" if args.resplit_per_seed
+                           else "frozen"),
         "rmse": test["rmse"], "mae": test["mae"], "nrmse": test["nrmse"], "r2": test["r2"],
         "best_epoch": best_epoch, "n_params": n_params, "n_trainable": n_trainable,
         "elapsed_s": time.time() - start,

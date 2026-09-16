@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
+
+import numpy as np
 from typing import List, Optional, Sequence, Tuple
 
 from torch.utils.data import Subset
@@ -137,4 +139,50 @@ def split_dataset(
         return scaffold_split(dataset, frac_train, frac_val, frac_test, seed, smiles_list=smiles_list)
     if strategy == "random":
         return random_split_subsets(dataset, frac_train, frac_val, frac_test, seed)
-    raise ValueError(f"Unknown split strategy: {strategy!r} (expected 'scaffold' or 'random')")
+    if strategy == "deepchem-random":
+        return deepchem_random_split_subsets(dataset, frac_train, frac_val, frac_test, seed)
+    raise ValueError(f"Unknown split strategy: {strategy!r} "
+                     f"(expected 'scaffold', 'random' or 'deepchem-random')")
+
+
+def deepchem_random_split_subsets(
+    dataset,
+    frac_train: float = 0.8,
+    frac_val: float = 0.1,
+    frac_test: float = 0.1,
+    seed: int = 2025,
+) -> Tuple[Subset, Subset, Subset]:
+    """Byte-for-byte reproduction of dc.splits.RandomSplitter, without importing it.
+
+    Exists so results can be compared molecule-for-molecule against work that uses
+    DeepChem's splitter, on the same pool with the same seed, instead of only in
+    distribution. Importing DeepChem for four lines of arithmetic would drag TensorFlow
+    into the critical path, which is why it was made optional in the first place.
+
+    It differs from random_split_subsets in BOTH places that decide a partition:
+
+        RNG       numpy's legacy global generator, not random.Random -- a different
+                  stream, so the same seed gives a different permutation.
+        cutoffs   cumulative (int(0.9 * n)) rather than independent (int(0.1 * n)).
+                  On ESOL's 1117 molecules that alone is valid/test = 112/112 here
+                  against 111/113 there.
+
+    VERIFY ONCE against a real DeepChem run before relying on the identity: compare a
+    dumped test.csv for one seed. The algorithm is reproduced from DeepChem's documented
+    behaviour, and this file cannot check itself.
+    """
+    total = frac_train + frac_val + frac_test
+    if abs(total - 1.0) > 1e-4:
+        raise ValueError("fractions must sum to 1.0")
+    n_total = len(dataset)
+    np.random.seed(seed)                       # the global legacy generator, as DeepChem does
+    shuffled = np.random.permutation(range(n_total))
+    train_cutoff = int(frac_train * n_total)
+    valid_cutoff = int((frac_train + frac_val) * n_total)
+    return (
+        # int(), not np.int64: these indices travel into pandas .iloc and JSON, where a
+        # numpy scalar is a needless surprise.
+        Subset(dataset, [int(i) for i in shuffled[:train_cutoff]]),
+        Subset(dataset, [int(i) for i in shuffled[train_cutoff:valid_cutoff]]),
+        Subset(dataset, [int(i) for i in shuffled[valid_cutoff:]]),
+    )
