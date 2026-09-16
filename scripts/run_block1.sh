@@ -25,6 +25,13 @@ if [[ -f "${THESIS_VENV:-$HOME/venvs/thesis}/bin/activate" ]]; then
   # shellcheck disable=SC1090
   source "${THESIS_VENV:-$HOME/venvs/thesis}/bin/activate"
 fi
+# Count the cores BEFORE the export below, and not after. GNU nproc honours
+# OMP_NUM_THREADS, so setting it to 1 first makes nproc answer 1 on a 32-core machine;
+# the script then mined 1.9M molecules single-process and said so in one line that read
+# like a setting rather than a fault. nproc and not nproc --all: it respects cgroup
+# limits and CPU affinity, which is the number that matters on a shared box.
+NCPU=$(nproc)
+
 # Each stage forks one process per core already; BLAS threads on top of that
 # oversubscribe the machine and make it slower.
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTHONUNBUFFERED=1
@@ -33,7 +40,6 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTHONUNBUFFER
 # never fall below half of them. The previous rule collapsed to a single worker on
 # anything with four cores or fewer, which turns pair mining over 1.9M molecules from
 # hours into days, and announces it as "1 workers" quietly enough to miss.
-NCPU=$(nproc)
 W="${WORKERS:-$(( NCPU - 2 > NCPU / 2 ? NCPU - 2 : (NCPU > 1 ? NCPU / 2 : 1) ))}"
 LIMIT_ARG=${LIMIT:+--limit $LIMIT}
 F=${FORCE:+--force}
