@@ -90,6 +90,16 @@ def predictive() -> bool:
                 spread = (a.std() + b.std()) / 2
                 how = "entre medias (semillas no emparejadas)"
             better = label.get(ka if gap < 0 else kb, "?")
+            if paired:
+                # How often the difference points the same way, which the ratio cannot
+                # say. The size of the benefit varies with the partition -- an easy test
+                # set narrows it, a hard one widens it -- so the paired spread carries a
+                # real interaction and not only noise, and a consistent sign is the
+                # sturdier claim. n of n one way is p = 0.5**n under the null.
+                wins = int((d < 0).sum()) if gap < 0 else int((d > 0).sum())
+                p = 0.5 ** len(d)
+                print(f"      -> {wins}/{len(d)} semillas favorecen a {better}"
+                      + (f" (signo consistente, p={p:.3f} bajo la nula)" if wins == len(d) else ""))
             if abs(gap) < spread:
                 print(f"      -> diferencia {abs(gap):.4f}, dentro de la dispersion "
                       f"{how} ({spread:.4f}): no es un resultado")
