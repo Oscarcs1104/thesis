@@ -155,7 +155,7 @@ def main() -> None:
     if args.arch == "hybrid":
         arm = ("graph+smiles" if args.use_graph and args.use_smiles
                else "graph-only" if args.use_graph else "smiles-only")
-        tag = f"hybrid_{arm}"
+        tag = f"hybrid_{arm.replace(chr(43), chr(95))}"  # no + in filenames
     else:
         tag = args.config.replace("+", "_")
     run_name = f"{tag}_s{args.seed}"

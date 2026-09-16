@@ -1,17 +1,22 @@
 #!/bin/bash
-# Supervised pretraining on MOSES over exact RDKit descriptors. Everything unfrozen.
+# Step 1 -- supervised pretraining on MOSES over exact RDKit descriptors. Unfrozen.
 #
-#   CONFIG=chemberta+gin sbatch scripts/slurm/pretrain_moses.sbatch
-#   CONFIG=molformer+gin sbatch scripts/slurm/pretrain_moses.sbatch
-#   CONFIG=molformer+gin LM_TOP_N=4 sbatch scripts/slurm/pretrain_moses.sbatch
+#   ARCH=hybrid                       sbatch scripts/slurm/pretrain_moses.sbatch
+#   ARCH=pretrained CONFIG=chemberta+gin sbatch scripts/slurm/pretrain_moses.sbatch
+#   ARCH=pretrained CONFIG=molformer+gin LM_TOP_N=4 sbatch scripts/slurm/pretrain_moses.sbatch
 #
-# Both configs MUST get the same STEPS, or the comparison is about the budget rather
-# than the backbones. ChemBERTa is 3 layers / ~3.3M params while MoLFormer is 12 layers
-# at hidden 768, so the MoLFormer arm costs far more wall clock for the same steps --
-# that is expected and is not a reason to shorten it.
+# ARCH=hybrid is the thesis's own encoder and the ONLY one whose checkpoint can go on
+# to initialize the generation half -- the pretrained-backbone variants use a different
+# featurization and have no character-level SMILES branch.
 #
-# First run featurizes 1.94M molecules into the Hu et al. graph cache (~600 MB), once.
-# mkdir -p results/logs before the first submit.
+# Every arch/config MUST get the same STEPS, or the table compares budgets rather than
+# encoders. MoLFormer (12 layers, hidden 768) costs far more wall clock per step than
+# hybrid (~4.7M-parameter encoder); that is expected, not a reason to shorten it.
+#
+# Writes checkpoints/pretrain_moses/<tag>_s<seed>.pt, e.g. hybrid_graph_smiles_s2025.pt
+#
+# First run featurizes 1.94M molecules into the graph cache for its schema, once.
+# mkdir -p results/logs before the first submit -- SLURM opens the log files first.
 
 #SBATCH --job-name=thesis-pretrain
 #SBATCH --account=mol_thesis
@@ -31,9 +36,21 @@ source "${THESIS_VENV:-$HOME/venvs/thesis}/bin/activate"
 export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
 
+ARCH="${ARCH:-hybrid}"
+ARM_FLAGS=""
+case "${ARM:-graph+smiles}" in
+  graph+smiles) ARM_FLAGS="" ;;
+  graph-only)   ARM_FLAGS="--no-use-smiles" ;;
+  smiles-only)  ARM_FLAGS="--no-use-graph" ;;
+  *) echo "ARM must be graph+smiles, graph-only or smiles-only"; exit 1 ;;
+esac
+
 python crossmodal_model/train/pretrain_moses.py \
+    --arch "$ARCH" \
     --config "${CONFIG:-chemberta+gin}" \
     --max-steps "${STEPS:-40000}" \
     --batch-size "${BATCH:-256}" \
     --lm-top-n "${LM_TOP_N:-0}" \
-    --num-workers 6
+    --seed "${SEED:-2025}" \
+    --num-workers 6 \
+    $ARM_FLAGS
