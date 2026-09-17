@@ -586,48 +586,6 @@ problema, y es la afirmación más robusta cuando la magnitud varía.
 > referencia usan `ddof=0` y las de aquí `ddof=1`: con tres semillas el factor es √(3/2) =
 > 1,22, suficiente para cambiar si una diferencia cae dentro o fuera de la dispersión.
 
-#### 3.2.3 Líneas de referencia: MoLA tal como se publica, y corregida
-
-La mitad predictiva se contrasta contra la implementación original de MoLA, reproducida
-dentro de este trabajo en lugar de comparada desde fuera: mismo pool, mismo particionador,
-mismo optimizador y mismo planificador, de modo que una diferencia frente a HybridMoLA sea la
-arquitectura y su featurización y nada más. Sus rasgos propios se conservan intactos —
-características de átomo densas de `MolGraphConvFeaturizer` proyectadas por una capa lineal,
-frente a las nueve columnas categóricas OGB con un *embedding* por columna.
-
-Se reportan **dos filas** de esa referencia, porque su rama de SMILES se construye con
-`positional_smiles=False`, y bajo ese ajuste el tensor de *embeddings* sale como `[B, L, H]` y
-entra en un `TransformerEncoderLayer` con `batch_first=False`, que lo interpreta como
-`[secuencia, lote, característica]`. La auto-atención recorre entonces el eje de las
-moléculas: cada molécula atiende a las demás de su lote en una posición de carácter fija, en
-lugar de recorrer sus propios caracteres.
-
-Ninguna etiqueta cruza entre moléculas —no es fuga de `y`—, pero una métrica de test presupone
-que `f(xᵢ)` depende solo de `xᵢ`. Medido sobre un modelo entrenado, puntuando las mismas 113
-moléculas de test de ESOL y variando únicamente el agrupamiento:
-
-| | lote 1 | lote 4 | lote 8 | lote 32 | lote 64 | 5 barajados a lote 32 |
-|---|---:|---:|---:|---:|---:|---:|
-| referencia | 2,482 | 0,764 | 0,735 | 0,697 | 0,698 | 0,694 – 0,699 |
-| eje corregido | 0,750 | 0,750 | 0,750 | 0,750 | 0,750 | 0,750 – 0,750 |
-
-La dependencia es del **tamaño** del lote (rango 1,78) y no de su composición a tamaño fijo
-(rango 0,005): el modelo emplea el lote como estadística de población, no explota vecinos
-concretos. Con lotes de una molécula la predicción es peor que la media del conjunto
-(σ = 2,095), de modo que el modelo no puede puntuar un compuesto aislado.
-
-El indicador `positional_smiles` agrupa tres cambios —el eje, un *embedding* posicional
-aprendido y una máscara de acolchado real— que no pueden separarse porque la máscara carece de
-sentido hasta que el eje está bien. La dependencia del lote es atribuible al eje en exclusiva,
-puesto que las otras dos operan molécula a molécula; la diferencia en RMSE, en cambio, es del
-conjunto de los tres.
-
-Ese coste está medido dos veces de forma independiente. En las corridas commiteadas del propio
-trabajo de referencia, con partición por scaffold, corregir la rama cuesta +0,102 de RMSE en
-ESOL y +0,097 en Lipophilicity. En la reproducción de aquí, con partición aleatoria, +0,105 en
-ESOL. Que dos mediciones separadas coincidan en ESOL hasta la tercera cifra refuerza el
-diagnóstico.
-
 ### 3.3 Entrenamiento del decoder
 
 El decoder descrito en §1.6 tiene 6 capas y se entrena 60 000 pasos con lote 256.
@@ -781,27 +739,7 @@ conjunto más grande, donde la dispersión entre semillas es menor.
 > moléculas afectadas son el 1 % del conjunto y su discrepancia mediana es nula— pero las
 > magnitudes se moverán y la tabla definitiva debe medirse sobre el benchmark sin fusionar.
 
-### 4.3 Líneas de referencia
-
-Reproducción de MoLA sobre el mismo pool y el mismo protocolo, en sus dos variantes (§3.2.3):
-
-| Conjunto | MoLA publicada | MoLA con el eje corregido | coste de la corrección |
-|---|---:|---:|---:|
-| ESOL | 0,590 ± 0,054 | 0,695 ± 0,029 | +0,105 |
-| FreeSolv | 1,153 ± 0,283 | 1,342 ± 0,231 | +0,189 |
-| Lipophilicity | 0,571 ± 0,023 | 0,756 ± 0,013 | +0,185 |
-
-La variante publicada supera a la corregida en los tres conjuntos. Dado que sus predicciones
-no son independientes entre moléculas, la fila comparable con el resto de la tabla es la
-segunda.
-
-> **Procedencia.** Estas corridas acumularon dos invocaciones sobre las mismas tres semillas,
-> de modo que las medias abarcan seis medidas de tres particiones y no un diseño limpio de tres
-> semillas. La dispersión reportada subestima por ello la variabilidad real, y la repetición
-> está pendiente. Las magnitudes son estables entre las dos invocaciones y el orden entre filas
-> no depende de esta salvedad.
-
-### 4.4 Mitad generativa: el condicionamiento funciona
+### 4.3 Mitad generativa: el condicionamiento funciona
 
 Evaluación con oráculo RDKit (§3.6): se solicita un Δ logP, se genera, y se mide con RDKit el
 Δ realmente obtenido. Cada bin se pide a las **mismas** 100 moléculas semilla del split de
@@ -838,7 +776,7 @@ sobrecorrección, el comportamiento esperado.
 modo que apretar el control aleja del compuesto de partida. Es un compromiso real entre control
 y similitud, y un resultado por sí mismo.
 
-### 4.5 Ablación de modalidades y de preentrenamiento: resultado nulo
+### 4.4 Ablación de modalidades y de preentrenamiento: resultado nulo
 
 Los cuatro brazos difieren en 0,033 de ρ a w = 1 y 0,065 a w = 3. Con una única semilla de
 entrenamiento por brazo, eso no es una diferencia defendible.
@@ -863,7 +801,7 @@ minados tienen Tanimoto ≥ 0,50, un modelo que copiase la semilla puntuaría bi
 aprendido a condicionar. Se reporta para constatar que los cuatro entrenamientos convergieron,
 no para compararlos.
 
-### 4.6 El contraste entre las dos mitades
+### 4.5 El contraste entre las dos mitades
 
 El preentrenamiento sobre MOSES **mejora la predicción de propiedades y no mejora la generación
 condicionada**; en la segunda, apunta a perjudicarla.
@@ -899,7 +837,7 @@ mecanismo demostrado.
   siempre existe una molécula de partida.
 - **Rango de control acotado por los datos.** El percentil 99 del Δ de logP es ±1,77;
   solicitar desplazamientos mayores sería extrapolación.
-- **Una sola semilla de entrenamiento en la mitad generativa.** Los cuatro brazos de §4.5 se
+- **Una sola semilla de entrenamiento en la mitad generativa.** Los cuatro brazos de §4.4 se
   entrenaron una vez cada uno. El resultado nulo de la ablación y la desventaja consistente del
   brazo preentrenado descansan, por tanto, sobre una única inicialización por brazo. Elevar la
   afirmación de observación a resultado exige repetir los cuatro con dos semillas más.
@@ -910,13 +848,14 @@ mecanismo demostrado.
 
 - **El particionador compatible con DeepChem no está verificado.** §3.2.2 reproduce
   `dc.splits.RandomSplitter` sin importar DeepChem, a partir de su comportamiento documentado.
-  Los tamaños de partición coinciden con los de una corrida de referencia, lo que confirma la
-  aritmética de cortes, pero no la permutación. Hasta ejecutar `scripts/verify_splitter.py`
-  contra DeepChem real, la formulación defendible es «mismo procedimiento de partición», no
-  «particiones idénticas».
+  La aritmética de cortes está confirmada —los tamaños de partición que produce coinciden con
+  los esperados de esa implementación— pero no la permutación. Importa para situar estos
+  resultados junto a los publicados, que se midieron con ese particionador. Hasta ejecutar
+  `scripts/verify_splitter.py` contra DeepChem real, la formulación defendible es «mismo
+  procedimiento de partición», no «particiones idénticas».
 
 - **Dominancia de una modalidad: descartada como explicación, sin alternativa.** La ablación
-  de §4.5 no muestra que una rama asuma el trabajo —los brazos de una sola modalidad igualan al
+  de §4.4 no muestra que una rama asuma el trabajo —los brazos de una sola modalidad igualan al
   fusionado— sino que la fusión no aporta nada medible sobre cualquiera de ellas. Por qué el
   segundo eje de información no ayuda queda sin explicar.
 
@@ -926,15 +865,18 @@ mecanismo demostrado.
 
 - **Repetir §4.2 sobre el benchmark sin fusionar duplicados**, para que las magnitudes
   correspondan al conjunto que §2.4 define.
-- **Repetir §4.3 con un diseño limpio de tres semillas**, sin la acumulación de dos
-  invocaciones.
-- **Dos semillas más para los cuatro brazos generativos** (§4.5), unas seis horas de GPU, que
+- **Dos semillas más para los cuatro brazos generativos** (§4.4), unas seis horas de GPU, que
   convierten la desventaja del brazo preentrenado de observación en resultado.
 - **Ejecutar `scripts/verify_splitter.py`** donde haya DeepChem instalado, para poder afirmar
   particiones idénticas en lugar de procedimiento idéntico.
 - **Ampliar el corpus hacia los extremos identificados en §2.5**: QM9 para el régimen pequeño
   —evaluado, con el solapamiento con FreeSolv ya medido— y una fuente de moléculas mayores para
   Lipophilicity. Coste de cómputo despreciable (§4.1); lo que está por ver es si mejora.
+- **Situar los resultados frente a la literatura publicada.** Al no reportarse ninguna
+  reimplementación de referencia, esta es la única comparación externa del trabajo, y de ella
+  depende que la mitad predictiva pueda leerse como competitiva y no solo como internamente
+  consistente. Requiere anotar de cada trabajo citado su criterio de partición, su número de
+  semillas, si fusionó duplicados y en qué unidades reporta el error.
 - **Figuras**: la curva pedido-vs-obtenido por brazo, y la tabla pareada con el conteo de
   signos.
 

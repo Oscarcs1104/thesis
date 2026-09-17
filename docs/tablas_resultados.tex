@@ -185,49 +185,6 @@
     repetición sobre el conjunto de la tabla~\ref{tab:a1-conjuntos} está pendiente.
   \end{minipage}
 \end{table}
-
-
-% B2 · Contra la implementación de referencia
-%
-% INCOMPLETA. Las dos primeras filas se midieron sobre el conjunto con duplicados
-% fusionados (1 117 moléculas en ESOL) y las dos últimas sobre el conjunto sin fusionar
-% (1 127 tras el filtro del caracterizador). No son comparables entre sí tal como están.
-% Para completarla: una corrida de las cuatro configuraciones sobre un único conjunto,
-%   CONFIGS=hybrid        bash scripts/run_ablation.sh   (con INIT y sin él)
-%   CONFIGS="mola mola-fixed" bash scripts/run_ablation.sh
-% y leer las medias con scripts/summarize_results.py.
-\begin{table}[htbp]
-  \centering
-  \caption{Comparación con la implementación de referencia sobre un único
-           pool y un único protocolo. RMSE en las unidades de cada conjunto.}
-  \label{tab:b2-referencia}
-  \small
-  \begin{tabular}{@{}lrrr@{}}
-    \toprule
-    Modelo & ESOL & FreeSolv & Lipophilicity \\
-    \midrule
-    HybridMoLA, preentrenado      & 0,611$^{\dagger}$ & 1,139$^{\dagger}$ & 0,671$^{\dagger}$ \\
-    HybridMoLA, desde cero        & 0,741$^{\dagger}$ & 1,420$^{\dagger}$ & 0,845$^{\dagger}$ \\
-    MoLA, tal como se publica     & 0,590$^{\ddagger}$ & 1,153$^{\ddagger}$ & 0,571$^{\ddagger}$ \\
-    MoLA, con el eje corregido    & 0,695$^{\ddagger}$ & 1,342$^{\ddagger}$ & 0,756$^{\ddagger}$ \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.5em}
-  \begin{minipage}{0.92\textwidth}
-    \footnotesize
-    $\dagger$ medido sobre el conjunto con duplicados fusionados;
-    $\ddagger$ sobre el conjunto sin fusionar.
-    \textbf{Las cuatro filas no son comparables entre sí en este estado}: proceden de dos
-    conjuntos distintos. La tabla queda pendiente de una corrida única de las cuatro
-    configuraciones bajo el mismo conjunto y protocolo. Las magnitudes relativas dentro
-    de cada par sí son válidas, y la fila comparable con el resto del trabajo es la
-    cuarta, no la tercera, porque las predicciones de la tercera no son independientes
-    entre moléculas (tabla~\ref{tab:d1-lote}).
-  \end{minipage}
-\end{table}
-
-
 % B3 · Contra la literatura publicada
 %
 % VACÍA DELIBERADAMENTE. Requiere cifras publicadas por terceros, que han de leerse de
@@ -260,57 +217,6 @@
     \bottomrule
   \end{tabularx}
 \end{table}
-
-
-% B4 · Detalle por semilla (apéndice)
-%
-% Faltan las tres corridas de Lipophilicity preentrenado, de las que solo se conservó la
-% media en el registro consultado. Salen de results/pretrained_ablation_*.csv, columnas
-% dataset, config, seed, rmse, r2, best_epoch.
-\begin{table}[htbp]
-  \centering
-  \caption{Detalle por corrida individual. Permite auditar la convergencia
-           de cada semilla.}
-  \label{tab:b4-semillas}
-  \small
-  \begin{tabular}{@{}lllrrr@{}}
-    \toprule
-    Conjunto & Configuración & Semilla & RMSE & $R^2$ & Época mejor \\
-    \midrule
-    ESOL          & desde cero   & 2025 & 0,787 & 0,850 & 14 \\
-    ESOL          & desde cero   & 2026 & 0,763 & 0,862 & 34 \\
-    ESOL          & desde cero   & 2027 & 0,672 & 0,879 & 34 \\
-    ESOL          & preentrenado & 2025 & 0,582 & 0,918 & 28 \\
-    ESOL          & preentrenado & 2026 & 0,656 & 0,898 & 12 \\
-    ESOL          & preentrenado & 2027 & 0,594 & 0,905 & 41 \\
-    \addlinespace
-    FreeSolv      & desde cero   & 2025 & 1,216 & 0,894 & 33 \\
-    FreeSolv      & desde cero   & 2026 & 1,296 & 0,906 & 28 \\
-    FreeSolv      & desde cero   & 2027 & 1,746 & 0,818 & 45 \\
-    FreeSolv      & preentrenado & 2025 & 1,131 & 0,909 &  9 \\
-    FreeSolv      & preentrenado & 2026 & 1,008 & 0,943 & 33 \\
-    FreeSolv      & preentrenado & 2027 & 1,279 & 0,902 & 41 \\
-    \addlinespace
-    Lipophilicity & desde cero   & 2025 & 0,784 & 0,594 & 37 \\
-    Lipophilicity & desde cero   & 2026 & 0,840 & 0,548 & 23 \\
-    Lipophilicity & desde cero   & 2027 & 0,909 & 0,437 & 26 \\
-    Lipophilicity & preentrenado & 2025 & \dots & \dots & \dots \\
-    Lipophilicity & preentrenado & 2026 & \dots & \dots & \dots \\
-    Lipophilicity & preentrenado & 2027 & \dots & \dots & \dots \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.5em}
-  \begin{minipage}{0.92\textwidth}
-    \footnotesize
-    Ninguna corrida presenta el patrón de no convergencia —pérdida de validación muy
-    superior al resto acompañada de un $R^2$ hundido— que invalidaría su inclusión en la
-    media. La semilla 2027 de FreeSolv es la más desfavorable de su fila, pero su $R^2$
-    de 0,818 es consistente con las demás.
-  \end{minipage}
-\end{table}
-
-
 % ---------------------------------------------------------------------
 %  BLOQUE C · Mitad generativa
 % ---------------------------------------------------------------------
@@ -486,49 +392,6 @@
     brazos; esa comparación es la de la tabla~\ref{tab:c3-ablacion}.
   \end{minipage}
 \end{table}
-
-
-% ---------------------------------------------------------------------
-%  BLOQUE D · Diagnósticos
-% ---------------------------------------------------------------------
-
-% D1 · Dependencia del agrupamiento en la implementación de referencia
-%
-% Esta tabla no figuraba en el esquema original, pero la tabla B2 la referencia: sin
-% ella, la nota al pie de B2 afirma algo que el capítulo no sostiene en ningún sitio.
-\begin{table}[htbp]
-  \centering
-  \caption{Dependencia del agrupamiento. El mismo modelo entrenado puntúa las
-           mismas 113 moléculas de prueba de ESOL variando únicamente cómo se
-           agrupan para evaluarlas.}
-  \label{tab:d1-lote}
-  \small
-  \begin{tabular}{@{}lrrrrrl@{}}
-    \toprule
-    & \multicolumn{5}{c}{Tamaño de agrupamiento} & \\
-    \cmidrule(lr){2-6}
-    Variante & 1 & 4 & 8 & 32 & 64 & Cinco reordenaciones a 32 \\
-    \midrule
-    Referencia     & 2,482 & 0,764 & 0,735 & 0,697 & 0,698 & 0,694--0,699 \\
-    Eje corregido  & 0,750 & 0,750 & 0,750 & 0,750 & 0,750 & 0,750--0,750 \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.5em}
-  \begin{minipage}{0.92\textwidth}
-    \footnotesize
-    Ninguna etiqueta cruza entre moléculas; no se trata de fuga de la variable objetivo.
-    Lo que ocurre es que la auto-atención de la rama de SMILES recorre el eje de las
-    moléculas en lugar del de los caracteres, de modo que la predicción de una molécula
-    depende de cuáles la acompañan. La dependencia es del tamaño del agrupamiento
-    (recorrido 1,78) y no de su composición a tamaño fijo (recorrido 0,005): el modelo
-    emplea el agrupamiento como estadística de población y no explota vecinos concretos.
-    Con agrupamientos unitarios la predicción es peor que la media del conjunto
-    ($\sigma = 2{,}095$), de modo que el modelo no puede puntuar un compuesto aislado.
-  \end{minipage}
-\end{table}
-
-
 % D2 · Estadística de los pares minados
 \begin{table}[htbp]
   \centering
