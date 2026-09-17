@@ -66,9 +66,30 @@ def predictive() -> bool:
     for extra in ("split_protocol", "n_pool"):
         if extra in df.columns and df[extra].nunique() > 1:
             group_keys.append(extra)
-    for keys, g in df.groupby(group_keys):
-        title = " / ".join(str(k) for k in (keys if isinstance(keys, tuple) else (keys,)))
-        print(f"\n  {title}")
+
+    # Which encoder a run started from is a third axis, and it needs different handling
+    # from the others: the from-scratch rows belong to no encoder and are the control for
+    # all of them. Grouping on the column directly loses them twice over -- pandas reads
+    # the empty tag as NaN and groupby drops NaN groups outright -- so instead the frame
+    # is split per encoder with the shared control copied into each.
+    if "init_tag" in df.columns:
+        df["init_tag"] = df["init_tag"].fillna("").astype(str)
+        encoders = sorted(t for t in df["init_tag"].unique() if t)
+    else:
+        encoders = []
+    if len(encoders) > 1:
+        scratch = df[df["init_tag"] == ""]
+        blocks = [(df[df["init_tag"] == t]._append(scratch) if hasattr(df, "_append")
+                   else pd.concat([df[df["init_tag"] == t], scratch]), t) for t in encoders]
+    else:
+        blocks = [(df, encoders[0] if encoders else None)]
+
+    for frame, encoder in blocks:
+      for keys, g in frame.groupby(group_keys):
+        parts = [str(k) for k in (keys if isinstance(keys, tuple) else (keys,))]
+        if encoder:
+            parts.append(f"init={encoder}")
+        print(f"\n  {' / '.join(parts)}")
         print(f"    {'fila':<22} {'RMSE':>16} {'MAE':>9} {'R2':>8} {'n':>3}")
         rows = {}
         for row_key, gg in g.groupby(key):

@@ -98,7 +98,7 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 2+2 featurization and have no character-level SMILES branch.
 ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola", "mola-fixed")
 
-CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "split_protocol", "n_pool",
+CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "init_tag", "split_protocol", "n_pool",
               "rmse", "mae", "nrmse", "r2",
               "best_epoch", "n_params", "n_trainable", "elapsed_s"]
 
@@ -543,6 +543,11 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
     return {
         "dataset": dataset, "config": config, "seed": seed,
         "pretrained": bool(args.init_checkpoint),
+        # WHICH encoder, not merely whether there was one. Two runs initialised from
+        # encoders pretrained on different corpora are different experiments and their
+        # rows look identical without this -- the filename kept them apart on disk and
+        # the summary merged them again on read.
+        "init_tag": (Path(args.init_checkpoint).stem if args.init_checkpoint else ""),
         # Which partition protocol produced this row. Two rows measured under different
         # protocols are not comparable, and without this the CSV cannot say which is which.
         "split_protocol": (f"resplit:{args.split_strategy}" if args.resplit_per_seed
