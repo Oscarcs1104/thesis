@@ -161,7 +161,7 @@ Este planteamiento elimina además el desajuste entre entrenamiento e inferencia
 condicionamiento absoluto se pedía `y = y_real ± 1σ`, una combinación que jamás aparece en
 los datos; con un Δ relativo, en cambio, pedir `Δ = −1` en inferencia es exactamente lo que
 el modelo vio miles de veces. La construcción del corpus de pares que materializa esta
-formulación se detalla en §2.5.
+formulación se detalla en §2.3.
 
 ### 1.4 Discretización de la condición
 
@@ -264,16 +264,18 @@ cambiar la semilla o el criterio de partición, moléculas que antes estaban en 
 pasarían a test y el corpus habría que reconstruirlo. Cubriendo los tres splits, la partición
 y el corpus dejan de depender el uno del otro.
 
-| Conjunto | Moléculas (los tres splits) | Eliminadas del corpus |
-|---|---:|---:|
-| ESOL | 1 117 | 37 |
-| FreeSolv | 642 | 0 |
-| Lipophilicity | 4 200 | 169 |
-| **Total (InChIKeys únicos)** | **5 564** | **196** |
+| Conjunto | Filas | InChIKeys únicos | Eliminadas del corpus |
+|---|---:|---:|---:|
+| ESOL | 1 128 | 1 117 | 37 |
+| FreeSolv | 642 | 642 | 0 |
+| Lipophilicity | 4 200 | 4 200 | 169 |
+| **Total** | **5 970** | **5 564** | **196** |
 
-La fila de total cuenta **InChIKeys únicos**, no la suma de las tres filas: 5 959 − 5 564 =
-395 moléculas figuran en más de un dataset, y basta una coincidencia para excluirlas del
-corpus. La columna de eliminadas sí es aditiva.
+El total de claves únicas no es la suma de las tres filas: 5 959 − 5 564 = 395 moléculas
+figuran en más de un dataset, y basta una coincidencia para excluirlas del corpus. La columna
+de eliminadas sí es aditiva. La diferencia entre filas y claves únicas en ESOL son las once
+duplicadas que §2.4 conserva deliberadamente; para esta exclusión da igual, porque lo que se
+compara son conjuntos de claves.
 
 El solape es del **3,5 %** de las 5 564 moléculas de evaluación. MOSES y estos tres conjuntos
 son poblaciones casi disjuntas, de modo que la fuga entre las dos mitades del trabajo era
@@ -378,13 +380,30 @@ experimentales. Se emplean tres conjuntos de regresión de MoleculeNet:
 
 | Conjunto | Propiedad | Moléculas | Test |
 |---|---|---:|---:|
-| ESOL (Delaney) | solubilidad acuosa, log mol/L | 1 117 | 113 |
+| ESOL (Delaney) | solubilidad acuosa, log mol/L | 1 128 | 113 |
 | FreeSolv (SAMPL) | energía libre de hidratación, kcal/mol | 642 | 65 |
 | Lipophilicity | logD a pH 7,4 | 4 200 | 420 |
 
-Los CSV se descargan del repositorio público de MoleculeNet, se canonicalizan, se deduplican
-por InChIKey —promediando el valor cuando dos entradas son la misma molécula— y se parten con
-un **split aleatorio fijo** (80/10/10, semilla 2025).
+Los CSV se descargan del repositorio público de MoleculeNet, se canonicalizan y se parten con
+un **split aleatorio** (80/10/10).
+
+**Los duplicados no se fusionan.** MoleculeNet distribuye ESOL con once moléculas repetidas
+por InChIKey —el mismo compuesto escrito de dos formas, y en algún caso con medidas que
+discrepan: el sorbitol aparece con 0,060 y con 1,090—. Fusionarlas promediando produce un
+conjunto más limpio y, a la vez, un conjunto **distinto**: 1 117 filas donde toda la
+literatura midió sobre 1 128. El RMSE deja entonces de ser comparable con las cifras
+publicadas y con cualquier otro grupo que corra el mismo benchmark. Entre un efecto pequeño
+de memorización y unos números incomparables, se conserva el benchmark tal como se
+distribuye y el efecto se reporta en lugar de eliminarse.
+
+> **Cuantificación del efecto conservado.** Con un reparto 80/10/10, la probabilidad de que
+> un par duplicado quede repartido entre entrenamiento y test es 2·0,8·0,1 = 0,16, de modo
+> que se esperan ~1,8 de los once pares, es decir un ~1,6 % del conjunto de test de ESOL. La
+> discrepancia mediana entre copias es 0,000: casi todas coinciden, y solo el sorbitol se
+> contradice de verdad. La deduplicación **sí** se mantiene, en cambio, entre el corpus de
+> preentrenamiento y los conjuntos de evaluación (§2.1.3), que es una cuestión distinta: allí
+> no se modifica ningún benchmark, se impide que el encoder se entrene sobre las moléculas
+> con las que después se le evalúa.
 
 La elección de partición aleatoria, y no por scaffold, sigue la recomendación del propio
 artículo de MoleculeNet para estos tres conjuntos: son tareas de fisicoquímica, donde la
@@ -395,18 +414,58 @@ clasificación biológica, donde el esqueleto sí determina la actividad. Usar s
 daría números más bajos que no serían comparables con la literatura y que medirían una
 dificultad distinta de la que el conjunto plantea.
 
-El split se congela en disco junto a un `split_meta.json` que registra el criterio, la semilla
-y los tamaños, y lo comparten todas las configuraciones y semillas, de modo que ninguna
-diferencia entre filas de la tabla de resultados pueda atribuirse a una partición distinta.
+Cada partición se acompaña de un `split_meta.json` que registra el criterio, la semilla, los
+tamaños y si se fusionaron duplicados, porque esa última decisión determina de qué benchmark
+se trata y dos conjuntos de resultados que difieran en ella no son promediables.
 
 > **Nota · dos particiones distintas en un mismo trabajo.** La partición aleatoria de §2.4 y
-> la partición por scaffold de los pares (§2.5) responden a preguntas distintas y conviven sin
+> la partición por scaffold de los pares (§2.6) responden a preguntas distintas y conviven sin
 > contradicción. En §2.4 se mide la capacidad de predecir una propiedad fisicoquímica y la
-> referencia publicada es aleatoria. En §2.5 lo que se mide es la generación de un análogo, y
+> referencia publicada es aleatoria. En §2.6 lo que se mide es la generación de un análogo, y
 > ahí el scaffold es exactamente lo que el modelo podría memorizar: un par cuyo origen esté en
 > entrenamiento y cuyo destino esté en test mediría memorización, no generalización.
 
-### 2.5 Partición de los pares
+### 2.5 Cobertura de distribución entre el corpus y los conjuntos de evaluación
+
+Una transferencia solo puede apoyarse en la parte del espacio químico que el corpus
+realmente visita. Medido sobre muestras de 20 000 moléculas, en átomos pesados (percentiles
+5 / 50 / 95) y peso molecular mediano:
+
+| Conjunto | p5 | p50 | p95 | MW mediana |
+|---|---:|---:|---:|---:|
+| MOSES | 17 | 21 | 25 | 300 |
+| ZINC-250k | 18 | 22 | 25 | 315 |
+| FreeSolv | 4 | 8 | 18 | 120 |
+| ESOL | 4 | 12 | 25 | 184 |
+| Lipophilicity | 15 | 27 | 38 | 388 |
+
+MOSES es *ZINC Clean Leads* filtrado a un peso molecular de 250-350, de modo que ocupa una
+banda de 17 a 25 átomos pesados. La consecuencia, que no era evidente antes de medirla, es
+que el corpus **no cubre bien ninguno de los tres conjuntos**, y falla por los dos extremos:
+FreeSolv queda íntegramente por debajo, la mediana de ESOL cae por debajo del percentil 5 del
+corpus, y más de la mitad de Lipophilicity supera su percentil 95. Que Lipophilicity sea un
+conjunto *drug-like* no lo hace del tamaño de MOSES.
+
+La misma medición descarta la opción aparentemente obvia de escalar el corpus con más ZINC:
+ZINC-250k ocupa esa banda con los mismos percentiles, así que diez millones de moléculas
+adicionales añadirían volumen y ninguna cobertura nueva.
+
+Este resultado cualifica el hallazgo de §3.2 en lugar de contradecirlo: el preentrenamiento
+mejora los tres conjuntos pese a una cobertura de distribución pobre, lo que hace la
+transferencia más notable, no menos. Y fija la dirección de la única ampliación de corpus que
+tiene sentido probar: hacia arriba y hacia abajo del rango, no hacia más volumen dentro de
+él.
+
+> **Un caso donde la exclusión de §2.1.3 dejó de ser rutinaria.** Al evaluar QM9 (129 440
+> moléculas de ≤9 átomos pesados) como candidato para el extremo pequeño, la comprobación de
+> solapamiento arrojó que QM9 contiene el **35,5 % de FreeSolv** (228 de 642) y el 21,7 % de
+> ESOL. Concatenarlo sin deduplicar habría puesto un tercio de un conjunto de evaluación
+> dentro del corpus de preentrenamiento, y el resultado de FreeSolv habría mejorado por
+> memorización sin que nada lo delatara. La exclusión por InChIKey, que frente a MOSES
+> eliminaba 196 moléculas de 1,94 M, aquí evita una fuga de esa magnitud a un coste del
+> 0,25 % de QM9.
+
+### 2.6 Partición de los pares
 
 Los pares, por su parte, se parten **por scaffold**, no por par. Como el minado opera dentro
 de grupos de scaffold, asignar esqueletos completos a una partición mantiene todos los pares
@@ -494,13 +553,80 @@ solo: el resultado es la diferencia entre ambas.
 > representar un carácter distinto. El modelo entrenaría, convergería, y estaría mal, sin
 > emitir ningún error.
 
-#### 3.2.2 Métricas
+#### 3.2.2 Métricas y protocolo de comparación
 
 Se reportan RMSE (métrica principal, en las unidades del objetivo), MAE, R² y NRMSE, esta
 última normalizada por la desviación típica del conjunto de entrenamiento —y no por el
 rango— para que un único valor extremo en un test pequeño como el de FreeSolv no la
-distorsione. Cada celda se repite con tres semillas (2025, 2026, 2027) y se reporta media y
-desviación.
+distorsione. Cada celda se repite con tres semillas (2025, 2026, 2027).
+
+**La partición se rehace en cada semilla**, con el mismo particionador aleatorio de DeepChem
+que emplea el trabajo de referencia, sobre el conjunto recombinado. Una partición congelada
+responde «¿es este modelo mejor que aquel?», porque todas las filas ven exactamente los
+mismos datos, pero no puede responder «¿es bueno este número»: un test de 113 moléculas es un
+único sorteo, y repartir de nuevo los mismos datos mueve el RMSE de un modelo sin cambios de
+0,485 a 0,663. Con la partición fija, la dispersión reportada cubre únicamente la
+inicialización de pesos y oculta un término un orden de magnitud mayor.
+
+**La comparación entre filas es pareada.** Las dos filas —desde cero y preentrenada— recorren
+las mismas semillas, y al rehacer la partición por semilla eso significa que ven las mismas
+particiones. Contrastar medias independientes descarta ese emparejamiento y carga al error
+una varianza que se cancela exactamente al restar; como esa varianza es aproximadamente diez
+veces el efecto, el contraste no pareado llega a declarar ruido una diferencia real.
+
+**Y se reporta el signo además de la magnitud.** El beneficio del preentrenamiento depende de
+qué moléculas caen en test —un test fácil estrecha la diferencia, uno difícil la ensancha—,
+de modo que la dispersión pareada arrastra una interacción real entre partición y tratamiento
+y no solo ruido. El número de semillas que apuntan en la misma dirección no sufre ese
+problema, y es la afirmación más robusta cuando la magnitud varía.
+
+> **Nota · comparabilidad del NRMSE.** El NRMSE definido aquí (RMSE / σ del entrenamiento) no
+> es el de la implementación de referencia, que normaliza por el rango. Los RMSE sí son
+> directamente comparables; los NRMSE no. Del mismo modo, las desviaciones publicadas por la
+> referencia usan `ddof=0` y las de aquí `ddof=1`: con tres semillas el factor es √(3/2) =
+> 1,22, suficiente para cambiar si una diferencia cae dentro o fuera de la dispersión.
+
+#### 3.2.3 Líneas de referencia: MoLA tal como se publica, y corregida
+
+La mitad predictiva se contrasta contra la implementación original de MoLA, reproducida
+dentro de este trabajo en lugar de comparada desde fuera: mismo pool, mismo particionador,
+mismo optimizador y mismo planificador, de modo que una diferencia frente a HybridMoLA sea la
+arquitectura y su featurización y nada más. Sus rasgos propios se conservan intactos —
+características de átomo densas de `MolGraphConvFeaturizer` proyectadas por una capa lineal,
+frente a las nueve columnas categóricas OGB con un *embedding* por columna.
+
+Se reportan **dos filas** de esa referencia, porque su rama de SMILES se construye con
+`positional_smiles=False`, y bajo ese ajuste el tensor de *embeddings* sale como `[B, L, H]` y
+entra en un `TransformerEncoderLayer` con `batch_first=False`, que lo interpreta como
+`[secuencia, lote, característica]`. La auto-atención recorre entonces el eje de las
+moléculas: cada molécula atiende a las demás de su lote en una posición de carácter fija, en
+lugar de recorrer sus propios caracteres.
+
+Ninguna etiqueta cruza entre moléculas —no es fuga de `y`—, pero una métrica de test presupone
+que `f(xᵢ)` depende solo de `xᵢ`. Medido sobre un modelo entrenado, puntuando las mismas 113
+moléculas de test de ESOL y variando únicamente el agrupamiento:
+
+| | lote 1 | lote 4 | lote 8 | lote 32 | lote 64 | 5 barajados a lote 32 |
+|---|---:|---:|---:|---:|---:|---:|
+| referencia | 2,482 | 0,764 | 0,735 | 0,697 | 0,698 | 0,694 – 0,699 |
+| eje corregido | 0,750 | 0,750 | 0,750 | 0,750 | 0,750 | 0,750 – 0,750 |
+
+La dependencia es del **tamaño** del lote (rango 1,78) y no de su composición a tamaño fijo
+(rango 0,005): el modelo emplea el lote como estadística de población, no explota vecinos
+concretos. Con lotes de una molécula la predicción es peor que la media del conjunto
+(σ = 2,095), de modo que el modelo no puede puntuar un compuesto aislado.
+
+El indicador `positional_smiles` agrupa tres cambios —el eje, un *embedding* posicional
+aprendido y una máscara de acolchado real— que no pueden separarse porque la máscara carece de
+sentido hasta que el eje está bien. La dependencia del lote es atribuible al eje en exclusiva,
+puesto que las otras dos operan molécula a molécula; la diferencia en RMSE, en cambio, es del
+conjunto de los tres.
+
+Ese coste está medido dos veces de forma independiente. En las corridas commiteadas del propio
+trabajo de referencia, con partición por scaffold, corregir la rama cuesta +0,102 de RMSE en
+ESOL y +0,097 en Lipophilicity. En la reproducción de aquí, con partición aleatoria, +0,105 en
+ESOL. Que dos mediciones separadas coincidan en ESOL hasta la tercera cifra refuerza el
+diagnóstico.
 
 ### 3.3 Entrenamiento del decoder
 
@@ -584,7 +710,7 @@ bins sustituyendo el escalar por los cuatro tokens.
 El protocolo de evaluación elimina la circularidad de raíz:
 
 1. Se toman moléculas semilla del **split de test**, es decir, pertenecientes a scaffolds que
-   el modelo no vio en ningún par de entrenamiento. Por la partición descrita en §2.5,
+   el modelo no vio en ningún par de entrenamiento. Por la partición descrita en §2.6,
    ninguna de esas moléculas apareció como origen ni como destino.
 2. Se solicita un Δ dentro del rango que los datos soportan, derivado de los percentiles de la
    tabla de §2.3.2.
