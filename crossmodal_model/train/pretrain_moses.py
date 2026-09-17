@@ -157,6 +157,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=2025)
     p.add_argument("--rebuild-cache", action="store_true")
     p.add_argument("--out-dir", type=str, default="checkpoints/pretrain_moses")
+    p.add_argument("--corpus-tag", type=str, default="",
+                   help="goes into the checkpoint name, so encoders pretrained on "
+                        "different corpora do not resolve to the same file. The "
+                        "corpus fingerprint is stored inside the checkpoint either "
+                        "way, but a name that hides the difference invites a rerun "
+                        "to replace a result it is not comparable with")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     add_wandb_args(p)
     p.set_defaults(wandb_project="thesis-pretrain-moses")
@@ -199,8 +205,15 @@ def main() -> None:
         tag = f"hybrid_{arm.replace(chr(43), chr(95))}"  # no + in filenames
     else:
         tag = args.config.replace("+", "_")
-    run_name = f"{tag}_s{args.seed}"
+    # The corpus is part of a pretrained encoder's identity, and the name did not carry
+    # it: two runs over different corpora resolved to the same file and the second
+    # silently replaced the first. --corpus-tag puts it in the name.
+    suffix = f"_{args.corpus_tag}" if args.corpus_tag else ""
+    run_name = f"{tag}{suffix}_s{args.seed}"
     ckpt_path = out_dir / f"{run_name}.pt"
+    if ckpt_path.exists():
+        print(f"NOTE: {ckpt_path.name} exists and will be overwritten. Pass --corpus-tag "
+              f"to keep both.")
 
     run = wandb_init(args, config=vars(args), name=run_name,
                      group=f"pretrain-{args.arch}", tags=[args.arch, tag])
@@ -215,6 +228,15 @@ def main() -> None:
     if args.limit:
         corpus, labels = corpus.iloc[:args.limit], labels[:args.limit]
     smiles = corpus["smiles"].astype(str).tolist()
+    from crossmodal_model.generation.pair_data import corpus_fingerprint
+
+    corpus_fp = corpus_fingerprint(smiles)
+    try:
+        corpus_sources = json.loads((corpus_dir / "meta.json").read_text(encoding="utf-8")).get("sources")
+    except Exception:  # noqa: BLE001 -- an older corpus has no such field
+        corpus_sources = None
+    print(f"corpus: {len(smiles):,} molecules, fingerprint {corpus_fp[:12]}"
+          + (f", sources {[s_['path'] for s_ in corpus_sources]}" if corpus_sources else ""))
 
     # The Hu et al. schema, kept in its own cache file: it is not interchangeable with
     # the OGB one the generation half uses.
@@ -355,6 +377,10 @@ def main() -> None:
                     "model_state_dict": model.state_dict(), "config": args.config,
                     "arch": args.arch, "char_vocab": cache.char_vocab, "schema": schema,
                     "use_graph": args.use_graph, "use_smiles": args.use_smiles,
+                    # Which corpus this encoder saw. A checkpoint carries no trace of it
+                    # otherwise, and a fine-tune cannot then tell two apart.
+                    "corpus_fingerprint": corpus_fp, "corpus_sources": corpus_sources,
+                    "corpus_n": int(len(corpus)),
                     # Explicit alongside args so anything rebuilding this encoder gets
                     # the same shape. A mismatch is a load-time shape error, which is
                     # the right failure, but only if the value travels with the weights.

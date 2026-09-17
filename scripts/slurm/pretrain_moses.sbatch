@@ -90,6 +90,7 @@ python crossmodal_model/train/pretrain_moses.py \
     --batch-size "${BATCH:-256}" \
     --lm-top-n "${LM_TOP_N:-0}" \
     --seed "${SEED:-2025}" \
+    --corpus-tag "${CORPUS_TAG:-}" \
     --num-workers 6 \
     $ARM_FLAGS \
     $WANDB_FLAGS
