@@ -55,7 +55,11 @@ run_row() {
   # is how a "from scratch" line came to average three architectures over an n of 18.
   local cfgtag
   cfgtag=$(echo "${CONFIGS:-hybrid}" | tr ' ' '-')
-  local out="results/pretrained_ablation_${TAG}_${cfgtag}_${name}.csv"
+  # LABEL distinguishes runs that differ in something the other name parts do not carry
+  # -- which corpus the initialising encoder saw, above all. Without it a second run
+  # appends its rows to the first one's file and the two become a single mean.
+  local label="${LABEL:+_$LABEL}"
+  local out="results/pretrained_ablation_${TAG}_${cfgtag}${label}_${name}.csv"
   echo
   echo "=== fila: $name -> $out ($(date +%H:%M:%S)) ==="
   python crossmodal_model/benchmark/pretrained_ablation.py \
