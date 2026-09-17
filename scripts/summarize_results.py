@@ -136,6 +136,40 @@ def predictive() -> bool:
                 size = ">100x" if ratio > 100 else f"{ratio:.1f}x"
                 print(f"      -> {better} mejor por {abs(gap):.4f} RMSE, {size} la "
                       f"dispersion {how} ({spread:.4f})")
+    # Encoder against encoder, paired by seed. Comparing them through their separate
+    # blocks means comparing numbers from different runs, and two identical runs differ
+    # by about 0.01 RMSE here: cuDNN picks algorithms by timing, PyG's scatter sums have
+    # no fixed order, and early stopping turns that into a discrete choice of which epoch
+    # wins. Pairing on the seed removes the partition draw; it does not remove that, so
+    # the spread below still carries it and a difference under it is not a result.
+    if len(encoders) > 1:
+        rule("1b. Encoder contra encoder, pareado por semilla")
+        pre = df[df["init_tag"] != ""]
+        for dataset, g in pre.groupby("dataset"):
+            series = {t: gg.set_index("seed")["rmse"] for t, gg in g.groupby("init_tag")}
+            names = sorted(series)
+            print(f"\n  {dataset}")
+            for t in names:
+                print(f"    {t:<40} {series[t].mean():.4f} +/- {series[t].std():.4f}")
+            for i in range(len(names)):
+                for j in range(i + 1, len(names)):
+                    a, b = series[names[i]], series[names[j]]
+                    shared = a.index.intersection(b.index)
+                    if len(shared) < 2:
+                        print(f"    ({names[i]} vs {names[j]}: sin semillas en comun)")
+                        continue
+                    d = a.loc[shared] - b.loc[shared]
+                    mejor = names[j] if d.mean() > 0 else names[i]
+                    wins = int((d > 0).sum()) if d.mean() > 0 else int((d < 0).sum())
+                    veredicto = ("dentro de la dispersion: no es un resultado"
+                                 if abs(d.mean()) < d.std()
+                                 else f"{abs(d.mean()) / max(d.std(), 1e-9):.1f}x la dispersion")
+                    print(f"      -> {mejor} mejor por {abs(d.mean()):.4f} "
+                          f"(+/- {d.std():.4f}), {wins}/{len(d)} semillas, {veredicto}")
+        print("\n  Esta es la comparacion valida entre corpus de preentrenamiento. Leerla")
+        print("  restando las medias de los bloques de arriba mezcla dos corridas distintas,")
+        print("  y dos corridas identicas difieren aqui en torno a 0.01 RMSE.")
+
     print("\n  RMSE menor es mejor. La desviacion es sobre semillas. Con 3 semillas esto es")
     print("  una comprobacion de cordura, no una prueba estadistica: sirve para descartar")
     print("  diferencias que no existen, no para afirmar las que si.")

@@ -145,6 +145,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-freeze-lm", dest="freeze_lm", action="store_false")
     p.add_argument("--freeze-gin", dest="freeze_gin", action="store_true", default=True)
     p.add_argument("--no-freeze-gin", dest="freeze_gin", action="store_false")
+    p.add_argument("--deterministic", action="store_true",
+                   help="fix cuDNN algorithm selection so a rerun reproduces exactly. "
+                        "Slower. Without it two identical runs differ by about 0.01 "
+                        "RMSE on the small sets, because early stopping turns "
+                        "floating-point noise into a different choice of best epoch")
     p.add_argument("--no-cache", action="store_true",
                    help="recompute frozen backbones every epoch instead of caching them")
     p.add_argument("--out", type=str, default=str(ROOT / "results" / "pretrained_ablation.csv"))
@@ -320,7 +325,13 @@ def load_split(dataset: str, hybrid: bool = False,
 
 
 def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str, float]:
-    seed_everything(seed, deterministic=False)
+    # Off by default because it costs speed and, more to the point, because the spread
+    # this table reports across seeds is larger than the run-to-run variation it would
+    # remove. It is not negligible either: cuDNN picks algorithms by timing and PyG's
+    # scatter sums have no fixed order, and early stopping turns those tiny differences
+    # into a discrete choice of which epoch wins, so two identical runs of ESOL can differ
+    # by 0.01 RMSE. Turn it on when a number has to reproduce exactly.
+    seed_everything(seed, deterministic=args.deterministic)
     device = args.device
     start = time.time()
 
