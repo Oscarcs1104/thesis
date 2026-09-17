@@ -214,6 +214,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-dir", type=str, default="data/moses")
     p.add_argument("--smiles-col", type=str, default="SMILES")
     p.add_argument("--limit", type=int, default=None, help="only the first N rows (smoke test)")
+    p.add_argument("--extra-csv", nargs="*", default=None,
+                   help="additional SMILES sources, concatenated before canonicalization "
+                        "so the vocabulary, deduplication and labels cover the union. "
+                        "MOSES spans 17-25 heavy atoms while FreeSolv spans 4-18 and "
+                        "Lipophilicity 15-38, so widening the corpus is about reaching "
+                        "those ends -- more ZINC lands in the same band MOSES already is")
     p.add_argument("--max-len", type=int, default=None,
                    help="max SELFIES tokens; default = the --length-percentile cutoff")
     p.add_argument("--length-percentile", type=float, default=99.5)
@@ -260,6 +266,34 @@ def main() -> None:
     if args.limit:
         smiles = smiles[: args.limit]
     print(f"Read {len(smiles)} SMILES from {src}")
+
+    # Extra corpora are concatenated here, before canonicalization, so everything
+    # downstream -- dedup by InChIKey, the SELFIES vocabulary, the token-length
+    # percentile, the RDKit labels -- is computed over the union and not bolted onto a
+    # corpus built from one source.
+    #
+    # The reason to want a union at all is coverage, measured: MOSES is ZINC Clean Leads
+    # filtered to MW 250-350, so it spans 17 to 25 heavy atoms while FreeSolv spans 4 to
+    # 18 and Lipophilicity 15 to 38. More ZINC would land in the same band; QM9 reaches
+    # the small end and a corpus of larger molecules is needed for the other.
+    sources = [(str(src), len(smiles))]
+    for extra in args.extra_csv or []:
+        extra_path = Path(extra)
+        if not extra_path.exists():
+            raise SystemExit(f"--extra-csv {extra_path} does not exist")
+        ex = pd.read_csv(extra_path)
+        col = next((c for c in ex.columns if c.lower() in ("smiles", "canonical_smiles")), None)
+        if col is None:
+            raise SystemExit(f"no SMILES column in {extra_path} (columns: {list(ex.columns)})")
+        add = ex[col].astype(str).tolist()
+        if args.limit:
+            add = add[: args.limit]
+        smiles.extend(add)
+        sources.append((str(extra_path), len(add)))
+        print(f"  + {len(add):,} from {extra_path}")
+    if len(sources) > 1:
+        print(f"  union before canonicalization: {len(smiles):,} SMILES from "
+              f"{len(sources)} sources")
 
     # ---------------- canonicalize + SELFIES ----------------
     print(f"Canonicalizing + SELFIES-encoding on {args.workers} workers...")
@@ -401,6 +435,10 @@ def main() -> None:
         },
     }, indent=2), encoding="utf-8")
     (out_dir / "meta.json").write_text(json.dumps({
+        # Which sources produced this corpus. Two corpora of the same size built from
+        # different unions are different experiments, and every checkpoint trained here
+        # inherits the difference.
+        "sources": [{"path": p_, "n_raw": n_} for p_, n_ in sources],
         "source": str(src),
         "n_raw": len(smiles),
         "n_rejected": n_rejected,
