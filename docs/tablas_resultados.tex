@@ -1,0 +1,563 @@
+% ------------------------------------------------------------------------
+% Tablas del capítulo de RESULTADOS.
+%
+% Rellenadas con los valores medidos hasta la última corrida de
+% preentrenamiento, ajuste fino y entrenamiento del decodificador.
+%
+% Lo que sigue con \dots NO se ha medido todavía. Cada hueco lleva encima un
+% comentario con qué falta y de dónde sale. No se ha inventado ningún valor:
+% en particular la tabla B3 queda vacía porque requiere cifras publicadas por
+% terceros, que deben leerse de sus artículos y no reconstruirse de memoria.
+%
+% Paquetes que estas tablas necesitan:
+%   \usepackage{booktabs, multirow, tabularx}
+% ------------------------------------------------------------------------
+
+% ---------------------------------------------------------------------
+%  BLOQUE A · Configuración experimental
+% ---------------------------------------------------------------------
+
+% A1 · Conjuntos de evaluación
+\begin{table}[htbp]
+  \centering
+  \caption{Conjuntos de regresión experimental: propiedad medida, unidades,
+           tamaño y criterio de partición.}
+  \label{tab:a1-conjuntos}
+  \small
+  \begin{tabular}{@{}llrrl@{}}
+    \toprule
+    Conjunto & Propiedad (unidades) & Moléculas & Test & Partición \\
+    \midrule
+    ESOL (Delaney)   & Solubilidad acuosa (log mol/L)        & 1\,128 & 113 & Aleatoria 80/10/10 \\
+    FreeSolv (SAMPL) & Energía libre de hidratación (kcal/mol) &   642 &  65 & Aleatoria 80/10/10 \\
+    Lipophilicity    & logD a pH 7,4 (adimensional)          & 4\,200 & 420 & Aleatoria 80/10/10 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    La partición se rehace en cada semilla sobre el conjunto recombinado; los tamaños
+    son constantes y la pertenencia varía. Los duplicados por identificador estructural
+    no se fusionan, de modo que ESOL conserva las 1\,128 filas con que se publicaron las
+    cifras de referencia.
+  \end{minipage}
+\end{table}
+
+
+% A2 · Corpus y control de fuga
+\begin{table}[htbp]
+  \centering
+  \caption{Control de fuga: moléculas de cada conjunto de evaluación y
+           eliminadas del corpus de preentrenamiento por coincidencia de
+           identificador estructural.}
+  \label{tab:a2-fuga}
+  \small
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Conjunto & Filas & Claves únicas & Eliminadas del corpus \\
+    \midrule
+    ESOL          & 1\,128 & 1\,117 &  37 \\
+    FreeSolv      &    642 &    642 &   0 \\
+    Lipophilicity & 4\,200 & 4\,200 & 169 \\
+    \midrule
+    \textbf{Total} & \textbf{5\,970} & \textbf{5\,564} & \textbf{196} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    Solape de esqueletos reportado y conservado: 728 esqueletos compartidos,
+    que cubren 304\,951 moléculas del corpus (15,7\,\%).
+    El total de claves únicas no es la suma de las tres filas porque 395 moléculas
+    figuran en más de un conjunto. La exclusión cubre los tres subconjuntos de cada
+    dataset, no solo el de prueba, para que el corpus no dependa de la partición en uso.
+  \end{minipage}
+\end{table}
+
+
+% A3 · Cobertura de distribución
+\begin{table}[htbp]
+  \centering
+  \caption{Cobertura de distribución. Átomos pesados (percentiles 5, 50 y 95)
+           y peso molecular mediano, sobre muestras de 20\,000 moléculas.}
+  \label{tab:a3-cobertura}
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    & \multicolumn{3}{c}{Átomos pesados} & \\
+    \cmidrule(lr){2-4}
+    Conjunto & p5 & p50 & p95 & MW mediana \\
+    \midrule
+    MOSES         & 17 & 21 & 25 & 300 \\
+    ZINC-250k     & 18 & 22 & 25 & 315 \\
+    \midrule
+    FreeSolv      &  4 &  8 & 18 & 120 \\
+    ESOL          &  4 & 12 & 25 & 184 \\
+    Lipophilicity & 15 & 27 & 38 & 388 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    El corpus ocupa la banda 17--25 y falla por los dos extremos: FreeSolv queda
+    íntegramente por debajo, la mediana de ESOL cae bajo su percentil 5 y más de la
+    mitad de Lipophilicity supera su percentil 95. ZINC-250k ocupa esa misma banda, de
+    modo que escalar el corpus con más ZINC añadiría volumen y ninguna cobertura nueva.
+  \end{minipage}
+\end{table}
+
+
+% A4 · Equiparación de capacidad entre ramas
+\begin{table}[htbp]
+  \centering
+  \caption{Equiparación de capacidad entre las dos ramas del codificador,
+           con tres capas y ancho oculto de 256.}
+  \label{tab:a4-capacidad}
+  \small
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    Rama & Parámetros iniciales & Parámetros equiparados \\
+    \midrule
+    SMILES & 3\,945\,216 & 3\,945\,216 \\
+    Grafo  &   450\,816 & 3\,219\,456 \\
+    \midrule
+    \textbf{Razón} & \textbf{8,75}$\times$ & \textbf{1,23}$\times$ \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    El desequilibrio inicial procede de que la capa transformadora fija su bloque
+    interno en 2\,048 unidades sin escalarlo con el ancho oculto, mientras que el
+    perceptrón de actualización del grafo operaba de ancho oculto a ancho oculto. La
+    equiparación otorga a ambas ramas el mismo bloque de propagación hacia adelante; el
+    1,23$\times$ restante corresponde al bloque de atención, cuya contrapartida en la
+    rama de grafo es el paso de mensajes y no parámetros.
+  \end{minipage}
+\end{table}
+
+
+% ---------------------------------------------------------------------
+%  BLOQUE B · Mitad predictiva
+% ---------------------------------------------------------------------
+
+% B1 · Efecto del preentrenamiento  (tabla principal de la mitad predictiva)
+\begin{table}[htbp]
+  \centering
+  \caption{Efecto del preentrenamiento sobre MOSES. Tres semillas por celda,
+           contraste pareado sobre las mismas particiones. Las dos filas de
+           cada conjunto comparten arquitectura y difieren solo en el origen
+           de los pesos iniciales.}
+  \label{tab:b1-preentrenamiento}
+  \small
+  \begin{tabular}{@{}llrrrrc@{}}
+    \toprule
+    Conjunto & Pesos iniciales & RMSE & MAE & $R^2$ & $\Delta$ pareada & Semillas \\
+    \midrule
+    \multirow{2}{*}{ESOL}
+      & desde cero    & 0,741 $\pm$ 0,061 & 0,573 & 0,864 &                    &     \\
+      & preentrenado  & \textbf{0,611} $\pm$ 0,040 & 0,459 & 0,907 & $-0{,}130 \pm 0{,}067$ & 3/3 \\
+    \midrule
+    \multirow{2}{*}{FreeSolv}
+      & desde cero    & 1,420 $\pm$ 0,286 & 1,005 & 0,872 &                    &     \\
+      & preentrenado  & \textbf{1,139} $\pm$ 0,136 & 0,707 & 0,918 & $-0{,}280 \pm 0{,}191$ & 3/3 \\
+    \midrule
+    \multirow{2}{*}{Lipophilicity}
+      & desde cero    & 0,845 $\pm$ 0,063 & 0,625 & 0,526 &                    &     \\
+      & preentrenado  & \textbf{0,671} $\pm$ 0,026 & 0,504 & 0,702 & $-0{,}174 \pm 0{,}054$ & 3/3 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    Las nueve semillas favorecen a la fila preentrenada. Bajo la hipótesis nula de
+    ausencia de efecto, nueve de nueve sobre particiones independientes tiene
+    probabilidad $0{,}5^9 = 0{,}002$; por conjunto separado, tres de tres alcanza solo
+    $0{,}125$, de modo que la afirmación se formula sobre las tres tareas conjuntamente.
+    La dispersión de la columna $\Delta$ es la del contraste pareado, no la diferencia
+    de las dispersiones de cada fila.
+    \textbf{Medido con los duplicados aún fusionados} (ESOL con 1\,117 filas); la
+    repetición sobre el conjunto de la tabla~\ref{tab:a1-conjuntos} está pendiente.
+  \end{minipage}
+\end{table}
+
+
+% B2 · Contra la implementación de referencia
+%
+% INCOMPLETA. Las dos primeras filas se midieron sobre el conjunto con duplicados
+% fusionados (1 117 moléculas en ESOL) y las dos últimas sobre el conjunto sin fusionar
+% (1 127 tras el filtro del caracterizador). No son comparables entre sí tal como están.
+% Para completarla: una corrida de las cuatro configuraciones sobre un único conjunto,
+%   CONFIGS=hybrid        bash scripts/run_ablation.sh   (con INIT y sin él)
+%   CONFIGS="mola mola-fixed" bash scripts/run_ablation.sh
+% y leer las medias con scripts/summarize_results.py.
+\begin{table}[htbp]
+  \centering
+  \caption{Comparación con la implementación de referencia sobre un único
+           pool y un único protocolo. RMSE en las unidades de cada conjunto.}
+  \label{tab:b2-referencia}
+  \small
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Modelo & ESOL & FreeSolv & Lipophilicity \\
+    \midrule
+    HybridMoLA, preentrenado      & 0,611$^{\dagger}$ & 1,139$^{\dagger}$ & 0,671$^{\dagger}$ \\
+    HybridMoLA, desde cero        & 0,741$^{\dagger}$ & 1,420$^{\dagger}$ & 0,845$^{\dagger}$ \\
+    MoLA, tal como se publica     & 0,590$^{\ddagger}$ & 1,153$^{\ddagger}$ & 0,571$^{\ddagger}$ \\
+    MoLA, con el eje corregido    & 0,695$^{\ddagger}$ & 1,342$^{\ddagger}$ & 0,756$^{\ddagger}$ \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    $\dagger$ medido sobre el conjunto con duplicados fusionados;
+    $\ddagger$ sobre el conjunto sin fusionar.
+    \textbf{Las cuatro filas no son comparables entre sí en este estado}: proceden de dos
+    conjuntos distintos. La tabla queda pendiente de una corrida única de las cuatro
+    configuraciones bajo el mismo conjunto y protocolo. Las magnitudes relativas dentro
+    de cada par sí son válidas, y la fila comparable con el resto del trabajo es la
+    cuarta, no la tercera, porque las predicciones de la tercera no son independientes
+    entre moléculas (tabla~\ref{tab:d1-lote}).
+  \end{minipage}
+\end{table}
+
+
+% B3 · Contra la literatura publicada
+%
+% VACÍA DELIBERADAMENTE. Requiere cifras publicadas por terceros, que han de leerse de
+% los artículos correspondientes. Reconstruirlas de memoria produciría valores plausibles
+% y falsos, que es el peor resultado posible en una tabla de comparación.
+%
+% Qué anotar de cada trabajo que se cite, sin lo cual la fila es inutilizable:
+%   - criterio de partición (aleatoria o por esqueleto) y proporciones
+%   - número de semillas y si la partición se rehace en cada una
+%   - si se fusionaron duplicados (cambia el tamaño de ESOL de 1 128 a 1 117)
+%   - si el RMSE se reporta en unidades originales o estandarizadas
+% Candidatos habituales: el artículo original de MoleculeNet, y trabajos de
+% preentrenamiento molecular que reporten los tres conjuntos bajo partición aleatoria.
+\begin{table}[htbp]
+  \centering
+  \caption{Situación frente a la literatura publicada. Cada fila indica el
+           protocolo de partición bajo el que se obtuvo la cifra, sin el cual
+           los valores no son comparables.}
+  \label{tab:b3-literatura}
+  \small
+  \begin{tabularx}{\textwidth}{@{}Xlrrr@{}}
+    \toprule
+    Trabajo & Partición & ESOL & FreeSolv & Lipophilicity \\
+    \midrule
+    \dots\ \cite{}          & \dots & \dots & \dots & \dots \\
+    \dots\ \cite{}          & \dots & \dots & \dots & \dots \\
+    \dots\ \cite{}          & \dots & \dots & \dots & \dots \\
+    \midrule
+    \textbf{Este trabajo}   & Aleatoria, rehecha por semilla & \textbf{0,611} & \textbf{1,139} & \textbf{0,671} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+
+% B4 · Detalle por semilla (apéndice)
+%
+% Faltan las tres corridas de Lipophilicity preentrenado, de las que solo se conservó la
+% media en el registro consultado. Salen de results/pretrained_ablation_*.csv, columnas
+% dataset, config, seed, rmse, r2, best_epoch.
+\begin{table}[htbp]
+  \centering
+  \caption{Detalle por corrida individual. Permite auditar la convergencia
+           de cada semilla.}
+  \label{tab:b4-semillas}
+  \small
+  \begin{tabular}{@{}lllrrr@{}}
+    \toprule
+    Conjunto & Configuración & Semilla & RMSE & $R^2$ & Época mejor \\
+    \midrule
+    ESOL          & desde cero   & 2025 & 0,787 & 0,850 & 14 \\
+    ESOL          & desde cero   & 2026 & 0,763 & 0,862 & 34 \\
+    ESOL          & desde cero   & 2027 & 0,672 & 0,879 & 34 \\
+    ESOL          & preentrenado & 2025 & 0,582 & 0,918 & 28 \\
+    ESOL          & preentrenado & 2026 & 0,656 & 0,898 & 12 \\
+    ESOL          & preentrenado & 2027 & 0,594 & 0,905 & 41 \\
+    \addlinespace
+    FreeSolv      & desde cero   & 2025 & 1,216 & 0,894 & 33 \\
+    FreeSolv      & desde cero   & 2026 & 1,296 & 0,906 & 28 \\
+    FreeSolv      & desde cero   & 2027 & 1,746 & 0,818 & 45 \\
+    FreeSolv      & preentrenado & 2025 & 1,131 & 0,909 &  9 \\
+    FreeSolv      & preentrenado & 2026 & 1,008 & 0,943 & 33 \\
+    FreeSolv      & preentrenado & 2027 & 1,279 & 0,902 & 41 \\
+    \addlinespace
+    Lipophilicity & desde cero   & 2025 & 0,784 & 0,594 & 37 \\
+    Lipophilicity & desde cero   & 2026 & 0,840 & 0,548 & 23 \\
+    Lipophilicity & desde cero   & 2027 & 0,909 & 0,437 & 26 \\
+    Lipophilicity & preentrenado & 2025 & \dots & \dots & \dots \\
+    Lipophilicity & preentrenado & 2026 & \dots & \dots & \dots \\
+    Lipophilicity & preentrenado & 2027 & \dots & \dots & \dots \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    Ninguna corrida presenta el patrón de no convergencia —pérdida de validación muy
+    superior al resto acompañada de un $R^2$ hundido— que invalidaría su inclusión en la
+    media. La semilla 2027 de FreeSolv es la más desfavorable de su fila, pero su $R^2$
+    de 0,818 es consistente con las demás.
+  \end{minipage}
+\end{table}
+
+
+% ---------------------------------------------------------------------
+%  BLOQUE C · Mitad generativa
+% ---------------------------------------------------------------------
+
+% C1 · Evaluación con oráculo  (tabla principal de la tesis)
+\begin{table}[htbp]
+  \centering
+  \caption{Evaluación generativa con oráculo. Cada brazo se evalúa con dos
+           pesos de guía sobre las mismas 100 moléculas semilla del conjunto
+           de prueba.}
+  \label{tab:c1-oraculo}
+  \setlength{\tabcolsep}{3.5pt}
+  \footnotesize
+  \begin{tabular}{@{}lrrrrrrrrr@{}}
+    \toprule
+    Brazo & $w$ & $\rho$ & Pend. & Valid. & Unic. & Nov. & Copia & Tanim. & Control \\
+    \midrule
+    \multirow{2}{*}{Fusión, desde cero}
+      & 1 & $+0{,}811$ & $+0{,}900$ & 1,000 & 0,930 & 0,854 & 0,040 & 0,520 & $-0{,}263$ \\
+      & 3 & $+0{,}856$ & $+1{,}145$ & 1,000 & 0,950 & 0,874 & 0,038 & 0,490 & $-0{,}181$ \\
+    \addlinespace
+    \multirow{2}{*}{Fusión, preentrenado}
+      & 1 & $+0{,}778$ & $+0{,}893$ & 1,000 & 0,958 & 0,885 & 0,025 & 0,463 & $-0{,}222$ \\
+      & 3 & $+0{,}806$ & $+1{,}158$ & 1,000 & 0,951 & 0,904 & 0,014 & 0,435 & $-0{,}222$ \\
+    \addlinespace
+    \multirow{2}{*}{Solo grafo}
+      & 1 & $+0{,}786$ & $+0{,}866$ & 1,000 & 0,935 & 0,857 & 0,039 & 0,522 & $-0{,}145$ \\
+      & 3 & $+0{,}851$ & $+1{,}114$ & 1,000 & 0,959 & 0,877 & 0,035 & 0,482 & $-0{,}153$ \\
+    \addlinespace
+    \multirow{2}{*}{Solo SMILES}
+      & 1 & $+0{,}812$ & $+0{,}885$ & 1,000 & 0,933 & 0,845 & 0,044 & 0,525 & $-0{,}156$ \\
+      & 3 & $+0{,}871$ & $+1{,}131$ & 1,000 & 0,950 & 0,876 & 0,034 & 0,481 & $-0{,}168$ \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.4em}
+  \begin{minipage}{0.95\textwidth}
+    \footnotesize
+    \textit{Fusión}: grafo y SMILES conjuntamente. \textit{Pend.}: pendiente de la
+    recta que enfrenta el desplazamiento solicitado con el obtenido.
+    \textit{Valid.}, \textit{Unic.}, \textit{Nov.}: validez, unicidad y novedad.
+    \textit{Tanim.}: similitud de Tanimoto respecto de la molécula semilla.
+    \textit{Control}: desplazamiento obtenido con la condición puesta al
+    intervalo nulo; su desviación típica va de 0,638 a 0,783, frente a 0,3--0,5 por
+    intervalo solicitado, de modo que condicionar desplaza la media y estrecha la
+    dispersión. La validez es 1,000 por construcción de la representación empleada en
+    la salida del decodificador, no por mérito del modelo.
+  \end{minipage}
+\end{table}
+
+
+% C2 · Pedido contra obtenido, por intervalo
+%
+% INCOMPLETA: faltan los intervalos 0 a 9, que quedaron fuera del registro consultado.
+% Están en results/oracle/pairs_graph_smiles_scratch_s2025_logp/summary.json, campo
+% guidance["1.0"]["per_bin"], claves bin, requested_centre, obtained_mean, obtained_std,
+% hit_rate, copy_rate, mean_tanimoto.
+\begin{table}[htbp]
+  \centering
+  \caption{Calibración por intervalo del brazo fusionado sin preentrenar, con
+           peso de guía unitario: desplazamiento solicitado frente al
+           realmente obtenido.}
+  \label{tab:c2-calibracion}
+  \setlength{\tabcolsep}{5pt}
+  \footnotesize
+  \begin{tabular}{@{}rrrrrrr@{}}
+    \toprule
+    Intervalo & $\Delta$ solicitado & $\Delta$ obtenido & Desv. & Tasa de acierto & Copia & Tanimoto \\
+    \midrule
+    0  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    1  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    2  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    3  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    4  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    5  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    6  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    7  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    8  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    9  & \dots & \dots & \dots & \dots & \dots & \dots \\
+    10 & $+0{,}007$ & $-0{,}048$ & 0,314 & 0,020 & 0,570 & 0,821 \\
+    11 & $+0{,}069$ & $-0{,}003$ & 0,398 & 0,190 & 0,010 & 0,489 \\
+    12 & $+0{,}166$ & $+0{,}099$ & 0,378 & 0,170 & 0,040 & 0,515 \\
+    13 & $+0{,}255$ & $+0{,}294$ & 0,328 & 0,300 & 0,010 & 0,516 \\
+    14 & $+0{,}347$ & $+0{,}434$ & 0,414 & 0,200 & 0,010 & 0,471 \\
+    15 & $+0{,}452$ & $+0{,}446$ & 0,506 & 0,210 & 0,000 & 0,458 \\
+    16 & $+0{,}580$ & $+0{,}662$ & 0,298 & 0,160 & 0,000 & 0,451 \\
+    17 & $+0{,}738$ & $+0{,}684$ & 0,590 & 0,320 & 0,000 & 0,425 \\
+    18 & $+0{,}985$ & $+0{,}899$ & 0,689 & 0,300 & 0,000 & 0,426 \\
+    19 & $+1{,}296$ & $+1{,}296$ & 0,681 & 0,720 & 0,000 & 0,380 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    El intervalo 10 corresponde a solicitar un desplazamiento nulo, y es el único con
+    una tasa de copia alta (0,570) y un Tanimoto elevado (0,821): devolver la molécula
+    de partida es una respuesta correcta a esa petición. Los intervalos primero y último
+    son abiertos, de modo que su centro es una extrapolación y su error absoluto no es
+    comparable con el de los centrales; en ellos debe leerse la tasa de acierto. Los
+    intervalos centrales son estrechos por construcción, al proceder de veinte cuantiles
+    de la distribución de desplazamientos, por lo que una tasa de acierto baja allí
+    refleja la anchura del intervalo tanto como el comportamiento del modelo.
+  \end{minipage}
+\end{table}
+
+
+% C3 · Ablación de los dos ejes
+\begin{table}[htbp]
+  \centering
+  \caption{Ablación sobre los dos ejes: modalidades del codificador y origen
+           de los pesos. Correlación entre desplazamiento solicitado y obtenido.}
+  \label{tab:c3-ablacion}
+  \small
+  \begin{tabular}{@{}llrr@{}}
+    \toprule
+    & & \multicolumn{2}{c}{$\rho$} \\
+    \cmidrule(lr){3-4}
+    Eje & Brazo & $w = 1$ & $w = 3$ \\
+    \midrule
+    \multirow{3}{*}{Modalidad}
+      & Grafo + SMILES & $+0{,}811$ & $+0{,}856$ \\
+      & Solo grafo     & $+0{,}786$ & $+0{,}851$ \\
+      & Solo SMILES    & $+0{,}812$ & $+0{,}871$ \\
+    \midrule
+    \multirow{2}{*}{Pesos iniciales}
+      & Desde cero     & $+0{,}811$ & $+0{,}856$ \\
+      & Preentrenado   & $+0{,}778$ & $+0{,}806$ \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    El brazo \emph{grafo + SMILES desde cero} es el pivote de ambos ejes y aparece dos
+    veces. Los brazos difieren en 0,033 con $w = 1$ y en 0,065 con $w = 3$; con una
+    única semilla de entrenamiento por brazo, ninguna de las dos separaciones es
+    defendible como diferencia. La fusión multimodal no supera a ninguna de las
+    modalidades por separado, y la inicialización desde el codificador preentrenado
+    queda última en ambos pesos de guía.
+  \end{minipage}
+\end{table}
+
+
+% C4 · Presupuesto y convergencia
+\begin{table}[htbp]
+  \centering
+  \caption{Presupuesto de cómputo y convergencia de los cuatro brazos
+           generativos, todos bajo el mismo número de pasos.}
+  \label{tab:c4-presupuesto}
+  \setlength{\tabcolsep}{5pt}
+  \footnotesize
+  \begin{tabular}{@{}lrrrrr@{}}
+    \toprule
+    Brazo & Parámetros & Pasos & Pérdida val. & Prec. tok. & Min. \\
+    \midrule
+    Grafo + SMILES, desde cero   & 14\,113\,319 & 60\,000 & 0,0953 & 0,9628 & 31 \\
+    Grafo + SMILES, preentren.   & 14\,113\,319 & 60\,000 & 0,1249 & 0,9510 & 31 \\
+    Solo grafo                   & 10\,135\,588 & 60\,000 & 0,1047 & 0,9588 & 16 \\
+    Solo SMILES                  & 10\,893\,857 & 60\,000 & 0,0981 & 0,9616 & 26 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    El presupuesto se fija en pasos y no en épocas para que un brazo cuyas épocas sean
+    más baratas no entrene más tiempo y convierta la comparación en una sobre tiempo de
+    reloj. La pérdida de validación mide reconstrucción de la secuencia de salida, no
+    condicionamiento: dado que los pares minados comparten una similitud mínima
+    apreciable, un modelo que copiase la molécula de partida puntuaría bien sin haber
+    aprendido a condicionar. Se reporta para constatar convergencia, no para comparar
+    brazos; esa comparación es la de la tabla~\ref{tab:c3-ablacion}.
+  \end{minipage}
+\end{table}
+
+
+% ---------------------------------------------------------------------
+%  BLOQUE D · Diagnósticos
+% ---------------------------------------------------------------------
+
+% D1 · Dependencia del agrupamiento en la implementación de referencia
+%
+% Esta tabla no figuraba en el esquema original, pero la tabla B2 la referencia: sin
+% ella, la nota al pie de B2 afirma algo que el capítulo no sostiene en ningún sitio.
+\begin{table}[htbp]
+  \centering
+  \caption{Dependencia del agrupamiento. El mismo modelo entrenado puntúa las
+           mismas 113 moléculas de prueba de ESOL variando únicamente cómo se
+           agrupan para evaluarlas.}
+  \label{tab:d1-lote}
+  \small
+  \begin{tabular}{@{}lrrrrrl@{}}
+    \toprule
+    & \multicolumn{5}{c}{Tamaño de agrupamiento} & \\
+    \cmidrule(lr){2-6}
+    Variante & 1 & 4 & 8 & 32 & 64 & Cinco reordenaciones a 32 \\
+    \midrule
+    Referencia     & 2,482 & 0,764 & 0,735 & 0,697 & 0,698 & 0,694--0,699 \\
+    Eje corregido  & 0,750 & 0,750 & 0,750 & 0,750 & 0,750 & 0,750--0,750 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    Ninguna etiqueta cruza entre moléculas; no se trata de fuga de la variable objetivo.
+    Lo que ocurre es que la auto-atención de la rama de SMILES recorre el eje de las
+    moléculas en lugar del de los caracteres, de modo que la predicción de una molécula
+    depende de cuáles la acompañan. La dependencia es del tamaño del agrupamiento
+    (recorrido 1,78) y no de su composición a tamaño fijo (recorrido 0,005): el modelo
+    emplea el agrupamiento como estadística de población y no explota vecinos concretos.
+    Con agrupamientos unitarios la predicción es peor que la media del conjunto
+    ($\sigma = 2{,}095$), de modo que el modelo no puede puntuar un compuesto aislado.
+  \end{minipage}
+\end{table}
+
+
+% D2 · Estadística de los pares minados
+\begin{table}[htbp]
+  \centering
+  \caption{Estadística de los pares minados. Los percentiles delimitan el
+           rango de desplazamiento que la evaluación puede solicitar.}
+  \label{tab:d2-pares}
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Propiedad & Desv. típica de $\Delta$ & p1 & p99 & $|\Delta| > 1\sigma$ \\
+    \midrule
+    logP & 0,685  & $-1{,}766$ & $+1{,}766$ & 27,7\,\% \\
+    TPSA & 15,784 & $-43{,}09$ & $+43{,}09$ & 29,4\,\% \\
+    QED  & 0,066  & $-0{,}198$ & $+0{,}198$ & 21,9\,\% \\
+    MW   & 27,679 & $-69{,}09$ & $+69{,}09$ & 32,1\,\% \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.92\textwidth}
+    \footnotesize
+    Pares totales: 12\,991\,314, de los cuales 649\,566 son de identidad.
+    Tanimoto intra-par: rango admitido $[0{,}50,\ 0{,}95]$; la mediana está pendiente de
+    extraer de \texttt{data/moses/pairs\_meta.json}.
+    La media de $\Delta$ es nula y los percentiles simétricos, lo que confirma que los
+    pares se emiten en ambas direcciones. La última columna se expresa en unidades de
+    desviación típica porque un umbral absoluto carece de sentido comparativo entre
+    propiedades cuyos rangos difieren en varios órdenes de magnitud.
+    El percentil 99 de logP, $\pm 1{,}77$, define el rango de control que la evaluación
+    puede solicitar; solicitar más sería extrapolación.
+  \end{minipage}
+\end{table}
