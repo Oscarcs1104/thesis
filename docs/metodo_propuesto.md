@@ -716,12 +716,12 @@ origen de los pesos iniciales.
 
 | Conjunto | | RMSE | MAE | R² | Δ pareada | semillas |
 |---|---|---:|---:|---:|---:|:---:|
-| ESOL | desde cero | 0,741 ± 0,061 | 0,573 | 0,864 | | |
-| | preentrenado | **0,611 ± 0,040** | 0,459 | 0,907 | −0,130 ± 0,067 | 3/3 |
-| FreeSolv | desde cero | 1,420 ± 0,286 | 1,005 | 0,872 | | |
-| | preentrenado | **1,139 ± 0,136** | 0,707 | 0,918 | −0,280 ± 0,191 | 3/3 |
-| Lipophilicity | desde cero | 0,845 ± 0,063 | 0,625 | 0,526 | | |
-| | preentrenado | **0,671 ± 0,026** | 0,504 | 0,702 | −0,174 ± 0,054 | 3/3 |
+| ESOL | desde cero | 0,775 ± 0,073 | 0,572 | 0,853 | | |
+| | preentrenado | **0,640 ± 0,014** | 0,480 | 0,901 | −0,134 ± 0,061 | 3/3 |
+| FreeSolv | desde cero | 1,308 ± 0,041 | 0,970 | 0,859 | | |
+| | preentrenado | **0,903 ± 0,154** | 0,547 | 0,934 | −0,406 ± 0,194 | 3/3 |
+| Lipophilicity | desde cero | 0,849 ± 0,018 | 0,656 | 0,508 | | |
+| | preentrenado | **0,675 ± 0,019** | 0,519 | 0,689 | −0,174 ± 0,029 | 3/3 |
 
 **El preentrenamiento sobre MOSES mejora los tres conjuntos, con las nueve semillas en la
 misma dirección.** Bajo la hipótesis nula de ausencia de efecto, nueve de nueve sobre
@@ -729,15 +729,26 @@ particiones independientes tiene probabilidad 0,5⁹ = 0,002. Enunciado por conj
 separado no alcanzaría significación —tres de tres da p = 0,125—, de modo que la afirmación se
 formula sobre las tres tareas conjuntamente.
 
-La mejora en R² de Lipophilicity, de 0,526 a 0,702, es la más pronunciada y corresponde al
-conjunto más grande, donde la dispersión entre semillas es menor.
+El efecto es mayor en FreeSolv (−0,406) que en los otros dos, lo que resulta contrario a lo
+que la cobertura de distribución (§2.5) haría esperar: FreeSolv es el conjunto que MOSES peor
+cubre. La mejora en R² de Lipophilicity, de 0,508 a 0,689, es la más pronunciada en términos
+de varianza explicada y corresponde al conjunto más grande, donde la dispersión entre semillas
+es menor.
 
-> **Procedencia.** Estas cifras se midieron cuando los conjuntos de MoleculeNet aún fusionaban
-> duplicados por InChIKey (ESOL con 1 117 filas). §2.4 documenta la decisión posterior de
-> conservarlos, que devuelve ESOL a 1 128 y restablece la comparabilidad con la literatura. La
-> repetición bajo esa configuración está pendiente. No se espera que altere el signo —las once
-> moléculas afectadas son el 1 % del conjunto y su discrepancia mediana es nula— pero las
-> magnitudes se moverán y la tabla definitiva debe medirse sobre el benchmark sin fusionar.
+> **Sobre la reproducibilidad de estas cifras.** Una medición anterior de la misma tabla, con
+> las mismas semillas y el mismo particionador, arrojó valores distintos: 0,611 / 1,139 / 0,671
+> en la fila preentrenada. La diferencia no procede de indeterminismo numérico sino del orden
+> de las filas del conjunto. La variante que fusionaba duplicados agrupaba por InChIKey, y esa
+> operación **reordena** el conjunto aunque no fusione ninguna fila; al conservarlos, el orden
+> pasa a ser el del fichero original. El particionador permuta índices, de modo que la misma
+> permutación sobre un orden distinto selecciona moléculas distintas. Ambas mediciones son
+> válidas y corresponden a dos particiones legítimas; las tres semillas favorecen al modelo
+> preentrenado en los tres conjuntos bajo las dos, lo que suma dieciocho comparaciones
+> concordantes sobre dos ordenaciones independientes.
+>
+> El entrenamiento se ejecuta además con determinismo de cuDNN desactivado, de modo que dos
+> corridas idénticas pueden diferir en la tercera o cuarta cifra decimal. Ese término es un
+> orden de magnitud menor que el anterior y no explica diferencias como las observadas aquí.
 
 ### 4.3 Mitad generativa: el condicionamiento funciona
 

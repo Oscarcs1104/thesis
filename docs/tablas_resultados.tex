@@ -159,16 +159,16 @@
     Conjunto & Pesos iniciales & RMSE & MAE & $R^2$ & $\Delta$ pareada & Semillas \\
     \midrule
     \multirow{2}{*}{ESOL}
-      & desde cero    & 0,741 $\pm$ 0,061 & 0,573 & 0,864 &                    &     \\
-      & preentrenado  & \textbf{0,611} $\pm$ 0,040 & 0,459 & 0,907 & $-0{,}130 \pm 0{,}067$ & 3/3 \\
+      & desde cero    & 0,775 $\pm$ 0,073 & 0,572 & 0,853 &                    &     \\
+      & preentrenado  & \textbf{0,640} $\pm$ 0,014 & 0,480 & 0,901 & $-0{,}134 \pm 0{,}061$ & 3/3 \\
     \midrule
     \multirow{2}{*}{FreeSolv}
-      & desde cero    & 1,420 $\pm$ 0,286 & 1,005 & 0,872 &                    &     \\
-      & preentrenado  & \textbf{1,139} $\pm$ 0,136 & 0,707 & 0,918 & $-0{,}280 \pm 0{,}191$ & 3/3 \\
+      & desde cero    & 1,308 $\pm$ 0,041 & 0,970 & 0,859 &                    &     \\
+      & preentrenado  & \textbf{0,903} $\pm$ 0,154 & 0,547 & 0,934 & $-0{,}406 \pm 0{,}194$ & 3/3 \\
     \midrule
     \multirow{2}{*}{Lipophilicity}
-      & desde cero    & 0,845 $\pm$ 0,063 & 0,625 & 0,526 &                    &     \\
-      & preentrenado  & \textbf{0,671} $\pm$ 0,026 & 0,504 & 0,702 & $-0{,}174 \pm 0{,}054$ & 3/3 \\
+      & desde cero    & 0,849 $\pm$ 0,018 & 0,656 & 0,508 &                    &     \\
+      & preentrenado  & \textbf{0,675} $\pm$ 0,019 & 0,519 & 0,689 & $-0{,}174 \pm 0{,}029$ & 3/3 \\
     \bottomrule
   \end{tabular}
 
@@ -179,10 +179,9 @@
     ausencia de efecto, nueve de nueve sobre particiones independientes tiene
     probabilidad $0{,}5^9 = 0{,}002$; por conjunto separado, tres de tres alcanza solo
     $0{,}125$, de modo que la afirmación se formula sobre las tres tareas conjuntamente.
-    La dispersión de la columna $\Delta$ es la del contraste pareado, no la diferencia
-    de las dispersiones de cada fila.
-    \textbf{Medido con los duplicados aún fusionados} (ESOL con 1\,117 filas); la
-    repetición sobre el conjunto de la tabla~\ref{tab:a1-conjuntos} está pendiente.
+    La dispersión de la columna $\Delta$ es la del contraste pareado y no la diferencia
+    de las dispersiones de cada fila: al compartir partición las dos filas de cada
+    conjunto, la varianza del sorteo se cancela al restar y no se imputa al error.
   \end{minipage}
 \end{table}
 % B3 · Contra la literatura publicada
@@ -213,7 +212,7 @@
     \dots\ \cite{}          & \dots & \dots & \dots & \dots \\
     \dots\ \cite{}          & \dots & \dots & \dots & \dots \\
     \midrule
-    \textbf{Este trabajo}   & Aleatoria, rehecha por semilla & \textbf{0,611} & \textbf{1,139} & \textbf{0,671} \\
+    \textbf{Este trabajo}   & Aleatoria, rehecha por semilla & \textbf{0,640} & \textbf{0,903} & \textbf{0,675} \\
     \bottomrule
   \end{tabularx}
 \end{table}
