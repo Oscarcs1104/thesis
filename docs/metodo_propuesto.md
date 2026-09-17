@@ -729,12 +729,169 @@ semilla (alta pero inferior a 1; si es 1, el modelo copia), y barrido del peso d
 
 ---
 
+---
+
+## 4. Resultados
+
+Todas las cifras de esta sección proceden de corridas concretas y cada bloque indica sobre
+qué estado del pipeline se midió, porque el protocolo evolucionó durante la experimentación y
+dos bloques medidos bajo protocolos distintos no son promediables.
+
+### 4.1 Coste computacional
+
+El preentrenamiento del encoder sobre 1 936 381 moléculas consume **11 min 39 s** en una RTX
+PRO 6000 Blackwell: 40 000 pasos a 57,2 pasos/s, es decir 14 649 moléculas por segundo y
+10 240 000 ejemplos vistos, unas 5,3 pasadas sobre el corpus. Cada brazo del decoder emplea
+entre 16 y 31 minutos para el mismo presupuesto de 60 000 pasos.
+
+La consecuencia de diseño es que **el cómputo no limita el tamaño del corpus**. Con el
+presupuesto fijado en pasos, ampliar el corpus no alarga el entrenamiento en absoluto; solo
+cambia cuántas veces se ve cada molécula. Manteniendo constantes las pasadas, decuplicar el
+corpus costaría menos de dos horas. El límite real es la memoria: la caché de grafos ocupa
+1,4 GB por cada 1,94 M de moléculas y se carga entera en RAM.
+
+### 4.2 Mitad predictiva: transferencia desde MOSES
+
+Medido con repartición por semilla (particionador aleatorio de DeepChem), tres semillas,
+contraste pareado. Ambas filas comparten arquitectura HybridMoLA y difieren únicamente en el
+origen de los pesos iniciales.
+
+| Conjunto | | RMSE | MAE | R² | Δ pareada | semillas |
+|---|---|---:|---:|---:|---:|:---:|
+| ESOL | desde cero | 0,741 ± 0,061 | 0,573 | 0,864 | | |
+| | preentrenado | **0,611 ± 0,040** | 0,459 | 0,907 | −0,130 ± 0,067 | 3/3 |
+| FreeSolv | desde cero | 1,420 ± 0,286 | 1,005 | 0,872 | | |
+| | preentrenado | **1,139 ± 0,136** | 0,707 | 0,918 | −0,280 ± 0,191 | 3/3 |
+| Lipophilicity | desde cero | 0,845 ± 0,063 | 0,625 | 0,526 | | |
+| | preentrenado | **0,671 ± 0,026** | 0,504 | 0,702 | −0,174 ± 0,054 | 3/3 |
+
+**El preentrenamiento sobre MOSES mejora los tres conjuntos, con las nueve semillas en la
+misma dirección.** Bajo la hipótesis nula de ausencia de efecto, nueve de nueve sobre
+particiones independientes tiene probabilidad 0,5⁹ = 0,002. Enunciado por conjunto por
+separado no alcanzaría significación —tres de tres da p = 0,125—, de modo que la afirmación se
+formula sobre las tres tareas conjuntamente.
+
+La mejora en R² de Lipophilicity, de 0,526 a 0,702, es la más pronunciada y corresponde al
+conjunto más grande, donde la dispersión entre semillas es menor.
+
+> **Procedencia.** Estas cifras se midieron cuando los conjuntos de MoleculeNet aún fusionaban
+> duplicados por InChIKey (ESOL con 1 117 filas). §2.4 documenta la decisión posterior de
+> conservarlos, que devuelve ESOL a 1 128 y restablece la comparabilidad con la literatura. La
+> repetición bajo esa configuración está pendiente. No se espera que altere el signo —las once
+> moléculas afectadas son el 1 % del conjunto y su discrepancia mediana es nula— pero las
+> magnitudes se moverán y la tabla definitiva debe medirse sobre el benchmark sin fusionar.
+
+### 4.3 Líneas de referencia
+
+Reproducción de MoLA sobre el mismo pool y el mismo protocolo, en sus dos variantes (§3.2.3):
+
+| Conjunto | MoLA publicada | MoLA con el eje corregido | coste de la corrección |
+|---|---:|---:|---:|
+| ESOL | 0,590 ± 0,054 | 0,695 ± 0,029 | +0,105 |
+| FreeSolv | 1,153 ± 0,283 | 1,342 ± 0,231 | +0,189 |
+| Lipophilicity | 0,571 ± 0,023 | 0,756 ± 0,013 | +0,185 |
+
+La variante publicada supera a la corregida en los tres conjuntos. Dado que sus predicciones
+no son independientes entre moléculas, la fila comparable con el resto de la tabla es la
+segunda.
+
+> **Procedencia.** Estas corridas acumularon dos invocaciones sobre las mismas tres semillas,
+> de modo que las medias abarcan seis medidas de tres particiones y no un diseño limpio de tres
+> semillas. La dispersión reportada subestima por ello la variabilidad real, y la repetición
+> está pendiente. Las magnitudes son estables entre las dos invocaciones y el orden entre filas
+> no depende de esta salvedad.
+
+### 4.4 Mitad generativa: el condicionamiento funciona
+
+Evaluación con oráculo RDKit (§3.6): se solicita un Δ logP, se genera, y se mide con RDKit el
+Δ realmente obtenido. Cada bin se pide a las **mismas** 100 moléculas semilla del split de
+test, de modo que la correlación es intra-semilla y no puede originarse en qué moléculas
+tocaron. Ningún predictor aprendido interviene.
+
+| Brazo | w | ρ | pendiente | validez | unicidad | novedad | copia | Tanimoto |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| grafo + SMILES, desde cero | 1 | +0,811 | +0,900 | 1,000 | 0,930 | 0,854 | 0,040 | 0,520 |
+| | 3 | +0,856 | +1,145 | 1,000 | 0,950 | 0,874 | 0,038 | 0,490 |
+| grafo + SMILES, preentrenado | 1 | +0,778 | +0,893 | 1,000 | 0,958 | 0,885 | 0,025 | 0,463 |
+| | 3 | +0,806 | +1,158 | 1,000 | 0,951 | 0,904 | 0,014 | 0,435 |
+| solo grafo | 1 | +0,786 | +0,866 | 1,000 | 0,935 | 0,857 | 0,039 | 0,522 |
+| | 3 | +0,851 | +1,114 | 1,000 | 0,959 | 0,877 | 0,035 | 0,482 |
+| solo SMILES | 1 | +0,812 | +0,885 | 1,000 | 0,933 | 0,845 | 0,044 | 0,525 |
+| | 3 | +0,871 | +1,131 | 1,000 | 0,950 | 0,876 | 0,034 | 0,481 |
+
+**El generador obedece.** ρ entre 0,78 y 0,87 sobre los veinte bins contiguos, con validez
+perfecta —garantizada por SELFIES—, novedad entre 0,85 y 0,90 y una tasa de copia por debajo
+del 4,4 %. Esa última columna es la que protege a ρ: un modelo que devolviera la semilla sin
+cambios tendría Δ constante y puntuaría bien en los bins centrales sin haber aprendido nada.
+
+**El control nulo confirma de dónde viene la señal.** Con la condición puesta al bin nulo,
+sobre las mismas semillas, el Δ se reparte alrededor de −0,15 a −0,26 con desviación de 0,64 a
+0,78. Condicionar desplaza la media a lo largo de ±1,3 y estrecha la dispersión a 0,3-0,5 por
+bin. Si el brazo nulo se pareciera a los bins solicitados, ρ provendría de otra fuente.
+
+**La guía sin clasificador actúa.** ρ aumenta en los cuatro brazos al pasar de w = 1 a w = 3, y
+la pendiente pasa de ~0,89 a ~1,14. Era el diagnóstico gratuito que ese mecanismo compra: si la
+condición se ignorase, w no cambiaría nada. Que a w = 3 la pendiente exceda 1,0 es
+sobrecorrección, el comportamiento esperado.
+
+**El Tanimoto a la semilla desciende al aumentar w** (0,520 → 0,490 en el brazo fusionado), de
+modo que apretar el control aleja del compuesto de partida. Es un compromiso real entre control
+y similitud, y un resultado por sí mismo.
+
+### 4.5 Ablación de modalidades y de preentrenamiento: resultado nulo
+
+Los cuatro brazos difieren en 0,033 de ρ a w = 1 y 0,065 a w = 3. Con una única semilla de
+entrenamiento por brazo, eso no es una diferencia defendible.
+
+**Ni la fusión multimodal ni el preentrenamiento aportan en la mitad generativa.** El brazo
+fusionado no supera a ninguna de las dos modalidades por separado, y el inicializado desde el
+encoder preentrenado en MOSES queda último en ambos pesos de guía, con un margen que se ensancha
+a w = 3 (0,806 frente a 0,851–0,871).
+
+Las pérdidas de entrenamiento concuerdan: el brazo preentrenado alcanza 0,1249 frente al 0,0953
+del mismo brazo desde cero. Es peor en reconstrucción **y** en condicionamiento.
+
+| Brazo | Parámetros | Pérdida val. | Precisión de token | Minutos |
+|---|---:|---:|---:|---:|
+| grafo + SMILES, desde cero | 14 113 319 | 0,0953 | 0,9628 | 31 |
+| grafo + SMILES, preentrenado | 14 113 319 | 0,1249 | 0,9510 | 31 |
+| solo grafo | 10 135 588 | 0,1047 | 0,9588 | 16 |
+| solo SMILES | 10 893 857 | 0,0981 | 0,9616 | 26 |
+
+Esa pérdida de validación mide reconstrucción de SELFIES, no condicionamiento: como los pares
+minados tienen Tanimoto ≥ 0,50, un modelo que copiase la semilla puntuaría bien sin haber
+aprendido a condicionar. Se reporta para constatar que los cuatro entrenamientos convergieron,
+no para compararlos.
+
+### 4.6 El contraste entre las dos mitades
+
+El preentrenamiento sobre MOSES **mejora la predicción de propiedades y no mejora la generación
+condicionada**; en la segunda, apunta a perjudicarla.
+
+Las columnas del oráculo respaldan un mecanismo desde tres direcciones independientes. El brazo
+preentrenado exhibe menor Tanimoto a la semilla (0,435–0,463 frente a ~0,49–0,52), menor tasa de
+copia (0,014–0,025 frente a ~0,04) y un control nulo más negativo (−0,222). Se aleja más de la
+molécula de entrada que los demás: **la usa menos**. Y es precisamente el de peor ρ.
+
+Eso concuerda con el objetivo bajo el que se preentrenó. La cabeza de regresión premia que la
+propiedad sea linealmente legible desde el vector pooleado, que es exactamente lo que la mitad
+predictiva necesita —y sus resultados lo confirman— pero no lo que el decoder necesita, que es
+detalle estructural para reconstruir un análogo. El preentrenamiento parece haber descartado
+justo eso.
+
+La afirmación se sostiene sobre una sola semilla de entrenamiento por brazo y se enuncia, por
+tanto, como hipótesis explicativa consistente con cuatro observaciones independientes, no como
+mecanismo demostrado.
+
+---
+
 ## Limitaciones
 
-- **Desplazamiento de dominio en el preentrenamiento.** MOSES está filtrado a espacio
-  drug-like, mientras que FreeSolv son mayoritariamente disolventes pequeños —el mismo
-  contraste que ya explicaba las cero coincidencias de §2.1.3—. La distribución de
-  preentrenamiento cubre mal ese conjunto y es donde cabe esperar menor transferencia.
+- **Desplazamiento de dominio en el preentrenamiento, cuantificado y sin cerrar.** MOSES
+  abarca de 17 a 25 átomos pesados y falla por los dos extremos: FreeSolv queda entero por
+  debajo, la mitad de ESOL por debajo y más de la mitad de Lipophilicity por encima (§2.5). La
+  transferencia medida en §4.2 ocurre pese a esa cobertura, no gracias a ella. La ampliación
+  del corpus hacia los dos extremos está identificada pero no ejecutada.
 - **No hay generación *de novo*.** El encoder necesita una entrada, de modo que no es posible
   generar sin molécula de partida. Es la contrapartida directa de exigir que el encoder sea
   imprescindible: la generación *de novo* carece de encoder y, por tanto, de fusión multimodal
@@ -742,21 +899,43 @@ semilla (alta pero inferior a 1; si es 1, el modelo copia), y barrido del peso d
   siempre existe una molécula de partida.
 - **Rango de control acotado por los datos.** El percentil 99 del Δ de logP es ±1,77;
   solicitar desplazamientos mayores sería extrapolación.
-- **Posible dominancia de una modalidad.** Al entrenar ambas ramas conjuntamente existe la
-  posibilidad real de que la de SMILES asuma todo el trabajo. Sería un resultado negativo para
-  la hipótesis, y es precisamente lo que la ablación de tres brazos (§3.4) está construida para
-  detectar en lugar de ocultar.
+- **Una sola semilla de entrenamiento en la mitad generativa.** Los cuatro brazos de §4.5 se
+  entrenaron una vez cada uno. El resultado nulo de la ablación y la desventaja consistente del
+  brazo preentrenado descansan, por tanto, sobre una única inicialización por brazo. Elevar la
+  afirmación de observación a resultado exige repetir los cuatro con dos semillas más.
+
+- **El contraste predictivo está medido sobre el benchmark con duplicados fusionados.** §2.4
+  documenta la decisión de conservarlos para preservar la comparabilidad con la literatura, y
+  §4.2 se midió antes de ese cambio. La repetición está pendiente.
+
+- **El particionador compatible con DeepChem no está verificado.** §3.2.2 reproduce
+  `dc.splits.RandomSplitter` sin importar DeepChem, a partir de su comportamiento documentado.
+  Los tamaños de partición coinciden con los de una corrida de referencia, lo que confirma la
+  aritmética de cortes, pero no la permutación. Hasta ejecutar `scripts/verify_splitter.py`
+  contra DeepChem real, la formulación defendible es «mismo procedimiento de partición», no
+  «particiones idénticas».
+
+- **Dominancia de una modalidad: descartada como explicación, sin alternativa.** La ablación
+  de §4.5 no muestra que una rama asuma el trabajo —los brazos de una sola modalidad igualan al
+  fusionado— sino que la fusión no aporta nada medible sobre cualquiera de ellas. Por qué el
+  segundo eje de información no ayuda queda sin explicar.
 
 ---
 
 ## Pendiente de completar
 
-Todo lo que dependa de resultados, que aún no existen:
-
-- Tabla de RMSE / MAE / R² por conjunto, configuración y semilla, con y sin preentrenamiento.
-- Curva pedido-vs-obtenido de la generación, y su pendiente, para los tres brazos.
-- Barrido del peso de guía.
-- Tamaños exactos de ESOL, FreeSolv y Lipophilicity tras la deduplicación por InChIKey (en el
-  documento figuran como aproximados).
+- **Repetir §4.2 sobre el benchmark sin fusionar duplicados**, para que las magnitudes
+  correspondan al conjunto que §2.4 define.
+- **Repetir §4.3 con un diseño limpio de tres semillas**, sin la acumulación de dos
+  invocaciones.
+- **Dos semillas más para los cuatro brazos generativos** (§4.5), unas seis horas de GPU, que
+  convierten la desventaja del brazo preentrenado de observación en resultado.
+- **Ejecutar `scripts/verify_splitter.py`** donde haya DeepChem instalado, para poder afirmar
+  particiones idénticas en lugar de procedimiento idéntico.
+- **Ampliar el corpus hacia los extremos identificados en §2.5**: QM9 para el régimen pequeño
+  —evaluado, con el solapamiento con FreeSolv ya medido— y una fuente de moléculas mayores para
+  Lipophilicity. Coste de cómputo despreciable (§4.1); lo que está por ver es si mejora.
+- **Figuras**: la curva pedido-vs-obtenido por brazo, y la tabla pareada con el conteo de
+  signos.
 
 ---
