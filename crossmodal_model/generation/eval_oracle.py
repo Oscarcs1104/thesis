@@ -255,6 +255,25 @@ def main() -> None:
         max_sm_len=int(ck.get("args", {}).get("max_sm_len", 100)),
         seed=args.seed, workers=args.num_workers,
     )
+
+    # The character vocabulary is built from the corpus on disk, while the SMILES
+    # embedding was sized and trained against the one in the checkpoint. If they differ,
+    # a character index can exceed the embedding's rows and CUDA raises a device-side
+    # assert -- asynchronously, so the traceback points at whatever kernel launched next
+    # rather than at the lookup. Widening the corpus is exactly how they come to differ:
+    # new molecules bring characters the old vocabulary never had.
+    ck_vocab = ck.get("char_vocab")
+    if ck_vocab is not None and ck_vocab != cache.char_vocab:
+        only_here = sorted(set(cache.char_vocab) - set(ck_vocab))
+        raise SystemExit(
+            f"The corpus at {args.corpus_dir} has a different character vocabulary than "
+            f"the checkpoint was trained with ({len(cache.char_vocab)} characters against "
+            f"{len(ck_vocab)}).\n"
+            + (f"  Only in the corpus: {only_here[:12]}\n" if only_here else "")
+            + f"  Every row of the SMILES embedding would stand for a different character.\n"
+            f"  Point --corpus-dir at the corpus this checkpoint was trained on."
+        )
+
     import pandas as pd
 
     corpus = pd.read_csv(ROOT / args.corpus_dir / "corpus.csv")

@@ -83,9 +83,12 @@ for CKPT in "${CKPTS[@]}"; do
   # One failure must not abandon the rest: three good arms are still a figure, and
   # the summary at the end says which one is missing rather than leaving it to the
   # scrollback. set -e would otherwise take the whole script down here.
+  # CORPUS_DIR has to be the corpus the checkpoint was trained on. The character
+  # vocabulary is rebuilt from whatever corpus is pointed at, and a wider one brings
+  # characters the trained SMILES embedding has no row for.
   if python crossmodal_model/generation/eval_oracle.py \
         --ckpt "$CKPT" \
-        --corpus-dir data/moses \
+        --corpus-dir "${CORPUS_DIR:-data/moses}" \
         --property "${PROPERTY:-logp}" \
         --seed "${SEED:-2025}" \
         --batch-size "${BATCH:-128}" \
