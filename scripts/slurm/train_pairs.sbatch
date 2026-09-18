@@ -77,6 +77,11 @@ fi
 # encoder makes the decoder work" to "a frozen pretrained encoder helps", so it is off
 # unless asked for.
 [[ "${FREEZE:-0}" == "1" ]] && FLAGS="$FLAGS --freeze-encoder"
+# FUSION=1 lets MoLA's cross-layer fusion contribute to the decoder's memory. Off, the
+# fusion never runs during generation -- 527,367 parameters allocated and never trained,
+# confirmed by scripts/check_generator_gradients.py -- and the modality ablation compares
+# which raw states enter the memory rather than the fusion itself.
+[[ "${FUSION:-0}" == "1" ]] && FLAGS="$FLAGS --fusion-in-memory"
 
 python crossmodal_model/generation/train_pairs.py \
     --corpus-dir data/moses \

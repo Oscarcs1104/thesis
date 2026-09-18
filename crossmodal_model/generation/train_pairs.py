@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--decoder-layers", type=int, default=6)
     p.add_argument("--num-bins", type=int, default=20)
     p.add_argument("--cond-dropout", type=float, default=0.15)
+    p.add_argument("--fusion-in-memory", action="store_true",
+                   help="let MoLA's cross-layer fusion contribute 2L tokens to the "
+                        "decoder's memory. Without it cross_attention and layer_weights "
+                        "never run during generation -- 527,367 parameters allocated and "
+                        "never trained -- and the modality ablation compares which raw "
+                        "states enter the memory rather than anything about the fusion")
     p.add_argument("--max-sm-len", type=int, default=100)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight-decay", type=float, default=0.01)
@@ -125,7 +131,8 @@ def main() -> None:
     # first. The "+" is dropped for the same reason as in pretrain_moses.py -- a plus
     # sign in a path that travels through shell variables is an avoidable hazard.
     init_tag = "pretrained" if args.init_encoder else "scratch"
-    run_name = args.run_name or f"pairs_{arm.replace('+', '_')}_{init_tag}_s{args.seed}"
+    fuse_tag = "_fused" if args.fusion_in_memory else ""
+    run_name = args.run_name or f"pairs_{arm.replace('+', '_')}_{init_tag}{fuse_tag}_s{args.seed}"
     out_dir = ROOT / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = out_dir / f"{run_name}.pt"
@@ -183,7 +190,8 @@ def main() -> None:
         mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=hidden_dim, pad_idx=pad_idx,
         cond_vocab_sizes=[b.num_bins + 1 for b in binners.values()],
         cond_null_bins=[b.null_bin for b in binners.values()],
-        cond_dropout=args.cond_dropout, decoder_layers=args.decoder_layers,
+        cond_dropout=args.cond_dropout, fusion_in_memory=args.fusion_in_memory,
+        decoder_layers=args.decoder_layers,
         max_len=args.max_sm_len + 32,
     ).to(device)
     if ck is not None:
@@ -300,6 +308,7 @@ def main() -> None:
                     # args alone would get the wrong width and fail at load.
                     "hidden_dim": hidden_dim, "num_layers": num_layers,
                     "gin_hidden_mult": gin_mult,
+                    "fusion_in_memory": bool(args.fusion_in_memory),
                     "arm": arm, "vocab": vocab, "char_vocab": cache.char_vocab,
                     "binners": {k: v.state_dict() for k, v in binners.items()},
                     "history": history,

@@ -194,6 +194,10 @@ def load_generator(ckpt_path: Path, device: str):
         cond_vocab_sizes=[binners[n].num_bins + 1 for n in PROPERTIES],
         cond_null_bins=[binners[n].null_bin for n in PROPERTIES],
         cond_dropout=float(a.get("cond_dropout", 0.15)),
+        # From the checkpoint, not from a default: a model trained with the fusion in its
+        # memory has a differently shaped memory and rebuilding it without would evaluate
+        # a different architecture than the weights belong to.
+        fusion_in_memory=bool(ck.get("fusion_in_memory", a.get("fusion_in_memory", False))),
         decoder_layers=int(a.get("decoder_layers", 6)),
         max_len=max_sm_len + 32,
     )

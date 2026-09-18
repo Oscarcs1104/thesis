@@ -56,9 +56,36 @@ class HybridMoLA(nn.Module):
     def _data_fields(self, data):
         return data.x, data.edge_index, data.edge_attr, data.sm, data.batch
 
-    def encode_for_generation(self, data):
+    def encode_for_generation(self, data, with_fusion: bool = False):
+        """Raw per-atom and per-character states for a cross-attention decoder.
+
+        with_fusion also returns the cross-layer fusion's output, [B, 2L, H], so the
+        decoder can attend to it alongside the raw states.
+
+        It is off by default because that is how every result so far was measured, and
+        because it was not an oversight that the fusion sat outside this path: a decoder
+        reconstructing a molecule needs to know which atom is where, and 2L pooled
+        vectors cannot say that. The raw states are the right memory.
+
+        What the default does mean is that cross_attention and layer_weights -- the MoLA
+        mechanism this architecture is named for -- never run during generation, so an
+        ablation over this path compares which raw states enter the memory and says
+        nothing about the fusion. Turning it on puts the fusion in the graph and makes
+        that comparison possible.
+        """
         x, edge_index, edge_attr, sm, batch = self._data_fields(data)
-        _, raw = self.encoder.forward_with_raw(x, edge_index, edge_attr, sm, batch)
+        fused_all, raw = self.encoder.forward_with_raw(x, edge_index, edge_attr, sm, batch)
+        if not with_fusion:
+            return raw
+        # attn_out * layer_weights, not the summed vector: the sum is one token among
+        # roughly 130 and trivial for the decoder to ignore -- the same failure the
+        # original prepended property token had. Keeping the 2L tokens separate gives the
+        # fusion real presence in the memory, and routes the gradient through both
+        # cross_attention and layer_weights rather than only the first.
+        attn_out, _ = self.cross_attention(fused_all, fused_all, fused_all)
+        weighted = attn_out * self.layer_weights          # [2L, B, H]
+        raw = dict(raw)
+        raw["fused_state"] = weighted.transpose(0, 1)     # [B, 2L, H]
         return raw
 
     def forward(self, data):

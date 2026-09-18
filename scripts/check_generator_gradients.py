@@ -49,35 +49,46 @@ def fake_molecule(gen: torch.Generator, n_atoms: int) -> Data:
     )
 
 
-def main() -> None:
+def build(fusion_in_memory: bool):
     torch.manual_seed(0)
-    gen = torch.Generator().manual_seed(0)
-
     mola = HybridMoLA(
         sm_vocab_size=SM_VOCAB, hidden_dim=HIDDEN, output_dim=1, num_layers=LAYERS,
         positional_smiles=True, max_sm_len=MAX_SM, use_graph=True, use_smiles=True,
         gin_hidden_mult=8,
     )
-    model = ConditionalMoleculeGenerator(
+    return ConditionalMoleculeGenerator(
         mola, vocab_size=VOCAB, hidden_dim=HIDDEN, pad_idx=0,
         cond_vocab_sizes=[N_BINS] * N_PROPS, cond_null_bins=[N_BINS - 1] * N_PROPS,
-        cond_dropout=0.15, decoder_layers=6, max_len=MAX_SM + 32,
+        cond_dropout=0.15, fusion_in_memory=fusion_in_memory,
+        decoder_layers=6, max_len=MAX_SM + 32,
     )
+
+
+def split_by_gradient(model, batch, cond, dec_in, dec_tgt):
+    """(with a gradient, without one) after exactly one forward and backward."""
     model.train()
+    model.zero_grad(set_to_none=True)
+    logits = model(batch, dec_in, cond)
+    torch.nn.functional.cross_entropy(
+        logits.reshape(-1, logits.size(-1)), dec_tgt.reshape(-1)).backward()
+    trained, dead = [], []
+    for name, p in model.named_parameters():
+        (trained if p.grad is not None else dead).append((name, p.numel()))
+    return trained, dead
+
+
+def main() -> None:
+    torch.manual_seed(0)
+    gen = torch.Generator().manual_seed(0)
 
     batch = Batch.from_data_list([fake_molecule(gen, 8 + i) for i in range(4)])
     cond = torch.randint(0, N_BINS, (4, N_PROPS))
     dec_in = torch.randint(1, VOCAB, (4, 12))
     dec_tgt = torch.randint(1, VOCAB, (4, 12))
 
-    logits = model(batch, dec_in, cond)
-    loss = torch.nn.functional.cross_entropy(
-        logits.reshape(-1, logits.size(-1)), dec_tgt.reshape(-1))
-    loss.backward()
-
-    trained, dead = [], []
-    for name, p in model.named_parameters():
-        (trained if p.grad is not None else dead).append((name, p.numel()))
+    print("  fusion_in_memory=False  (lo que midieron los cuatro brazos)")
+    model = build(False)
+    trained, dead = split_by_gradient(model, batch, cond, dec_in, dec_tgt)
 
     n_t, n_d = sum(n for _, n in trained), sum(n for _, n in dead)
     print(f"  parametros con gradiente : {n_t:>12,}  ({len(trained)} tensores)")
@@ -97,6 +108,21 @@ def main() -> None:
         print("  fusion. Un resultado nulo ahi no dice nada sobre la fusion.")
     else:
         print("\n  Todos los parametros reciben gradiente: la fusion si interviene.")
+
+    print("\n" + "-" * 70)
+    print("  fusion_in_memory=True  (el arreglo)")
+    _, dead2 = split_by_gradient(build(True), batch, cond, dec_in, dec_tgt)
+    n_d2 = sum(n for _, n in dead2)
+    print(f"    parametros SIN gradiente : {n_d2:>12,}  ({len(dead2)} tensores)")
+    for name, n in sorted(dead2, key=lambda kv: -kv[1]):
+        print(f"      {name:<50} {n:>10,}")
+    roots2 = sorted({n.split(".")[1] for n, _ in dead2 if n.startswith("mola.")})
+    print(f"    modulos de mola afectados: {roots2 or 'ninguno'}")
+    if "cross_attention" not in roots2 and "layer_weights" not in roots2:
+        print("\n    La fusion ya esta en el grafo. Lo que sigue fuera es out_layer_final,")
+        print("    la cabeza de regresion, que en generacion no predice nada: peso muerto")
+        print("    heredado de que el generador reutiliza el HybridMoLA entero, no un")
+        print("    mecanismo que se este dejando sin entrenar.")
 
 
 if __name__ == "__main__":

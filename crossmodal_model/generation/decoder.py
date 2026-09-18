@@ -63,6 +63,14 @@ def build_memory(
     )
 
     parts, pads = [], []
+    # The fusion tokens go first, ahead of the per-atom and per-character detail. They
+    # are [B, 2L, H] and never padded: every molecule has exactly one token per layer per
+    # active modality, which is what makes them a summary rather than a sequence.
+    fused_state = raw.get("fused_state")
+    if fused_state is not None:
+        parts.append(fused_state)
+        pads.append(torch.zeros(fused_state.shape[:2], dtype=torch.bool,
+                                device=fused_state.device))
     if node_state is not None:
         node_dense, node_real_mask = to_dense_batch(node_state, node_batch)  # [B,N,H], [B,N] True=real
         parts.append(node_dense)

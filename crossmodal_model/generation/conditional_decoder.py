@@ -96,6 +96,7 @@ class ConditionalMoleculeGenerator(nn.Module):
         cond_vocab_sizes: Sequence[int],
         cond_null_bins: Sequence[int],
         cond_dropout: float = 0.15,
+        fusion_in_memory: bool = False,
         decoder_layers: int = 4,
         num_heads: int = 8,
         max_len: int = 128,
@@ -108,6 +109,12 @@ class ConditionalMoleculeGenerator(nn.Module):
                              "the SMILES branch is enabled")
         self.mola = mola
         self.hidden_dim = hidden_dim
+        # Whether MoLA's cross-layer fusion contributes to the decoder's memory. Off
+        # reproduces every result measured so far, and leaves cross_attention and
+        # layer_weights outside the computation graph -- 527,367 parameters allocated,
+        # counted in the model's size and never trained. See
+        # HybridMoLA.encode_for_generation.
+        self.fusion_in_memory = fusion_in_memory
         self.condition = ConditionEmbedding(cond_vocab_sizes, cond_null_bins, hidden_dim, cond_dropout)
         self.decoder = MoLAGenerativeDecoder(
             vocab_size, hidden_dim, pad_idx,
@@ -115,7 +122,7 @@ class ConditionalMoleculeGenerator(nn.Module):
         )
 
     def _memory(self, data, cond_bins: torch.Tensor, force_null: bool = False):
-        raw = self.mola.encode_for_generation(data)
+        raw = self.mola.encode_for_generation(data, with_fusion=self.fusion_in_memory)
         cond = self.condition(cond_bins, force_null=force_null)
         return build_memory(raw, self.hidden_dim, condition=cond)
 
