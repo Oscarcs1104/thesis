@@ -219,7 +219,8 @@ def oracle() -> bool:
         return False
 
     print(f"\n    {'brazo':<30} {'w':>4} {'rho':>7} {'pend.':>7} {'valid':>6} "
-          f"{'unico':>6} {'novel':>6} {'copia':>6} {'tanim':>6} {'nulo':>7} {'sd':>6}")
+          f"{'unico':>6} {'novel':>6} {'div1':>6} {'div2':>6} {'copia':>6} "
+          f"{'tanim':>6} {'nulo':>7}")
     for f in files:
         s = json.loads(f.read_text(encoding="utf-8"))
         name = f.parent.name
@@ -229,14 +230,21 @@ def oracle() -> bool:
                   f"{g['spearman_request_vs_obtained']:>+7.3f} "
                   f"{g['slope_obtained_per_requested']:>+7.3f} "
                   f"{g['validity']:>6.3f} {g['uniqueness']:>6.3f} {g['novelty']:>6.3f} "
+                  f"{g.get('intdiv1_within_bin', float('nan')):>6.3f} "
+                  f"{g.get('intdiv2_within_bin', float('nan')):>6.3f} "
                   f"{g['copy_rate']:>6.3f} {g['mean_tanimoto_to_seed']:>6.3f} "
-                  f"{nc.get('mean_delta', float('nan')):>+7.3f} "
-                  f"{nc.get('std_delta', float('nan')):>6.3f}")
+                  f"{nc.get('mean_delta', float('nan')):>+7.3f}")
             name = ""      # solo en la primera fila de cada brazo
     print("\n  rho   correlacion entre el bin pedido y el delta obtenido, intra-semilla.")
     print("        Es el numero. Un modelo que ignora la condicion da ~0 aunque su")
     print("        perdida de la seccion 2 sea la mejor de las cuatro.")
     print("  pend. delta obtenido por unidad de delta pedido; 1.0 seria obediencia exacta.")
+    print("  div1  IntDiv1 e IntDiv2 DENTRO de un bin: cuan variadas son las respuestas")
+    print("  div2  a una misma peticion. La version global esta inflada por las propias")
+    print("        peticiones, que producen moleculas distintas aposta, y no se muestra")
+    print("        aqui (esta en summary.json). Complementan a 'unico', que cuenta")
+    print("        salidas distintas y da por diferentes dos moleculas que difieren en")
+    print("        un metilo.")
     print("  copia fraccion que devuelve la semilla sin cambios. rho alto con copia alta")
     print("        no existe, pero copia alta con rho ~0 es el modo de fallo esperado.")
     print("\n  Si rho no sube al subir w, la guia libre de clasificador no esta haciendo")

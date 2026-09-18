@@ -164,6 +164,45 @@ def tanimoto(seed_smiles: Sequence[str], gen_smiles: Sequence[Optional[str]]) ->
     return out
 
 
+def internal_diversity(smiles: Sequence[str], p: int = 1, max_n: int = 3000,
+                      seed: int = 0) -> float:
+    """MOSES's IntDiv_p over a set of molecules. Higher is more varied.
+
+        IntDiv_p(G) = 1 - mean_i ( mean_j T(m_i, m_j)^p ) ^ (1/p)
+
+    T is the Tanimoto between ECFP4 fingerprints, and the diagonal is included, as in
+    the reference implementation -- excluding it would make the metric depend on set
+    size. p=2 punishes the presence of near-duplicate pairs harder than p=1.
+
+    It complements the two diversity numbers already reported without replacing either.
+    Uniqueness counts how many outputs are distinct and calls two molecules differing by
+    one methyl entirely different; novelty asks whether an output is in the training
+    corpus and says nothing about the outputs' relation to each other. IntDiv measures
+    how far apart they actually are.
+
+    Quadratic in the number of molecules, so a sample is taken above max_n: at 3000 this
+    is nine million pairs, seconds with RDKit's bulk similarity, and the estimate is
+    already stable.
+    """
+    from rdkit import Chem, DataStructs, RDLogger
+    from rdkit.Chem import AllChem
+
+    RDLogger.DisableLog("rdApp.*")
+    mols = [m for m in (Chem.MolFromSmiles(str(x)) for x in smiles if x) if m is not None]
+    if len(mols) < 2:
+        return float("nan")
+    if len(mols) > max_n:
+        idx = np.random.default_rng(seed).choice(len(mols), max_n, replace=False)
+        mols = [mols[i] for i in idx]
+    fps = [AllChem.GetMorganFingerprintAsBitVect(m, 2, nBits=2048) for m in mols]
+
+    per_molecule = np.empty(len(fps))
+    for i, fp in enumerate(fps):
+        sims = np.asarray(DataStructs.BulkTanimotoSimilarity(fp, fps))
+        per_molecule[i] = (sims ** p).mean() ** (1.0 / p)
+    return float(1.0 - per_molecule.mean())
+
+
 # --------------------------------------------------------------------------------------
 # model
 # --------------------------------------------------------------------------------------
@@ -390,6 +429,23 @@ def summarize(df, binner: PropertyBinner, arm: str, ckpt_path: Path, args) -> di
 
         gvalid = gw["valid"].mean()
         uniq = valid["generated"].nunique() / max(len(valid), 1)
+        # Two readings, because they answer different questions for a conditional model.
+        # Globally, over every request at this guidance, diversity is inflated by the
+        # requests themselves: bin 0 and bin 19 produce different molecules by design.
+        # Within a bin -- 100 seeds all asked for the same delta -- it measures what is
+        # actually wanted, how varied the answers to one request are.
+        gen_all = valid[valid["request"] == "bin"]["generated"].tolist()
+        div = {f"intdiv{q}": internal_diversity(gen_all, p=q) for q in (1, 2)}
+        per_bin_div = {q: [] for q in (1, 2)}
+        for _, gb in conditioned.groupby("requested_bin"):
+            g = gb[gb["valid"]]["generated"].tolist()
+            for q in (1, 2):
+                v = internal_diversity(g, p=q)
+                if np.isfinite(v):
+                    per_bin_div[q].append(v)
+        for q in (1, 2):
+            div[f"intdiv{q}_within_bin"] = (float(np.mean(per_bin_div[q]))
+                                            if per_bin_div[q] else float("nan"))
         out["guidance"][str(w)] = {
             "spearman_request_vs_obtained": rho,
             "obtained_delta_is_constant": constant,
@@ -397,6 +453,7 @@ def summarize(df, binner: PropertyBinner, arm: str, ckpt_path: Path, args) -> di
             "slope_obtained_per_requested": slope,
             "validity": float(gvalid),
             "uniqueness": float(uniq),
+            **div,
             "novelty": float(valid["novel"].mean()) if len(valid) else float("nan"),
             "copy_rate": float(valid["is_copy"].mean()) if len(valid) else float("nan"),
             "mean_tanimoto_to_seed": float(valid["tanimoto_to_seed"].mean()) if len(valid) else float("nan"),
@@ -425,6 +482,12 @@ def report(summary: dict) -> None:
         print(f"  MAE vs bin centre                       : {g['mae_vs_bin_centre']:.3f}")
         print(f"  validity / uniqueness / novelty         : {g['validity']:.3f} / "
               f"{g['uniqueness']:.3f} / {g['novelty']:.3f}")
+        print(f"  IntDiv1 / IntDiv2  (global)             : "
+              f"{g.get('intdiv1', float('nan')):.3f} / {g.get('intdiv2', float('nan')):.3f}")
+        print(f"  IntDiv1 / IntDiv2  (dentro de un bin)   : "
+              f"{g.get('intdiv1_within_bin', float('nan')):.3f} / "
+              f"{g.get('intdiv2_within_bin', float('nan')):.3f}"
+              "   <- respuestas a una MISMA peticion")
         print(f"  copy rate / mean Tanimoto to seed       : {g['copy_rate']:.3f} / "
               f"{g['mean_tanimoto_to_seed']:.3f}")
         nc = g["null_control"]
