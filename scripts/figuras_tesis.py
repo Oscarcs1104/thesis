@@ -182,7 +182,7 @@ def cargar(args) -> dict:
 # figura 1
 # --------------------------------------------------------------------------------------
 
-def figura_cobertura(datos: dict, salida: Path, muestra: int) -> None:
+def figura_cobertura(datos: dict, salida: Path, muestra: int, png: bool = False) -> None:
     # 6.3 pulgadas es el \textwidth habitual de una tesis a una columna con márgenes de
     # 2,5 cm sobre A4. La altura se elige para que los paneles queden algo apaisados, que
     # es lo que conviene a una densidad.
@@ -236,8 +236,15 @@ def figura_cobertura(datos: dict, salida: Path, muestra: int) -> None:
     fig.tight_layout()
     salida.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(salida, bbox_inches="tight", format="pdf")
-    plt.close(fig)
     print(f"\n  escrito {salida}")
+    if png:
+        # El PDF es lo que va al documento; el PNG existe para mirar la figura de un
+        # vistazo cuando se genera en una máquina remota, donde ajustarla exige verla
+        # varias veces. A 200 ppp basta para juzgar composición y legibilidad.
+        alt = salida.with_suffix(".png")
+        fig.savefig(alt, bbox_inches="tight", format="png", dpi=200)
+        print(f"  escrito {alt}  (solo para previsualizar)")
+    plt.close(fig)
 
 
 def main() -> None:
@@ -252,11 +259,13 @@ def main() -> None:
     p.add_argument("--semilla", type=int, default=0)
     p.add_argument("--rehacer", action="store_true", help="ignorar los descriptores cacheados")
     p.add_argument("--salida", default="figuras/cobertura_distribucion.pdf")
+    p.add_argument("--png", action="store_true",
+                   help="ademas del PDF, un PNG a 200 ppp para previsualizar")
     args = p.parse_args()
 
     configurar_estilo()
     datos = cargar(args)
-    figura_cobertura(datos, ROOT / args.salida, args.muestra)
+    figura_cobertura(datos, ROOT / args.salida, args.muestra, png=args.png)
 
 
 if __name__ == "__main__":

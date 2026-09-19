@@ -32,3 +32,4 @@ results/mola/*_conditioning_semantic.csv
 # under results/ that IS tracked is a benchmark CSV we want in git on purpose.
 !results/_archive_pre_scaffold/
 figuras/.descriptores.npz
+figuras/*.png
