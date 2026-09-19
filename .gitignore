@@ -31,3 +31,4 @@ results/mola/*_conditioning_semantic.csv
 # The pre-scaffold-split results are kept as a historical record; everything else
 # under results/ that IS tracked is a benchmark CSV we want in git on purpose.
 !results/_archive_pre_scaffold/
+figuras/.descriptores.npz
