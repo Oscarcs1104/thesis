@@ -47,10 +47,15 @@ ESTILOS = {
     "Lipophilicity": dict(color="#009E73", lw=1.3, ls=":",  zorder=3),
 }
 
-# Rango intercuantílico 5-95 del corpus, medido. Se dibuja para que el lector vea de un
-# vistazo que FreeSolv queda entero por debajo y más de la mitad de Lipophilicity por
-# encima, que es el argumento del apartado.
-BANDA_MOSES = (17, 25)
+# El corpus de referencia: la banda sombreada es su rango intercuantílico 5-95 y las
+# demás curvas se leen contra ella. Se dibuja para que el lector vea de un vistazo que
+# FreeSolv queda entero por debajo y más de la mitad de Lipophilicity por encima, que es
+# el argumento del apartado.
+#
+# La banda se calcula de la propia muestra graficada y no se fija a mano: un número
+# escrito en el código puede acabar discrepando de los datos que la figura dibuja, y
+# nadie lo notaría.
+REFERENCIA = "MOSES"
 
 
 def configurar_estilo() -> None:
@@ -120,8 +125,8 @@ def descriptores(smiles, muestra: int, semilla: int = 0):
     return np.asarray(pesados, dtype=float), np.asarray(masa, dtype=float)
 
 
-def cargar(args) -> dict:
-    """{nombre: (átomos pesados, peso molecular)}, cacheado en disco.
+def cargar(args):
+    """({nombre: (átomos pesados, peso molecular)}, {nombre: tamaño original}).
 
     La caché existe porque ajustar una figura son muchas ejecuciones y recalcular los
     descriptores de 80 000 moléculas en cada una convierte un retoque de treinta segundos
@@ -134,7 +139,8 @@ def cargar(args) -> dict:
         z = np.load(cache, allow_pickle=False)
         if str(z["firma"]) == firma:
             print(f"  descriptores leídos de {cache.name}")
-            return {n: (z[f"{n}_pesados"], z[f"{n}_masa"]) for n in ESTILOS}
+            return ({n: (z[f"{n}_pesados"], z[f"{n}_masa"]) for n in ESTILOS},
+                    {n: int(z[f"{n}_total"]) for n in ESTILOS})
 
     moses_dir = ROOT / args.moses_dir
     meta = moses_dir / "meta.json"
@@ -153,7 +159,7 @@ def cargar(args) -> dict:
         "Lipophilicity": (ROOT / "data/deepchem_molnet/lipo/csv", "smiles"),
     }
 
-    datos = {}
+    datos, totales = {}, {}
     for nombre, (ruta, col) in conjuntos.items():
         if ruta.is_dir():
             # Los tres conjuntos de evaluación se grafican completos, recombinando sus
@@ -164,6 +170,7 @@ def cargar(args) -> dict:
             df = pd.read_csv(ruta, usecols=[col])
         else:
             raise SystemExit(f"no encuentro {ruta}")
+        totales[nombre] = len(df)
         pesados, masa = descriptores(df[col].astype(str), args.muestra, args.semilla)
         datos[nombre] = (pesados, masa)
         print(f"  {nombre:<14} {len(pesados):>7,} moléculas  "
@@ -174,46 +181,53 @@ def cargar(args) -> dict:
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache, firma=firma,
                         **{f"{n}_pesados": v[0] for n, v in datos.items()},
-                        **{f"{n}_masa": v[1] for n, v in datos.items()})
-    return datos
+                        **{f"{n}_masa": v[1] for n, v in datos.items()},
+                        **{f"{n}_total": totales[n] for n in datos})
+    return datos, totales
 
 
 # --------------------------------------------------------------------------------------
 # figura 1
 # --------------------------------------------------------------------------------------
 
-def figura_cobertura(datos: dict, salida: Path, muestra: int, png: bool = False) -> None:
+def figura_cobertura(datos: dict, totales: dict, salida: Path,
+                     png: bool = False) -> None:
     # 6.3 pulgadas es el \textwidth habitual de una tesis a una columna con márgenes de
     # 2,5 cm sobre A4. La altura se elige para que los paneles queden algo apaisados, que
     # es lo que conviene a una densidad.
     fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(6.3, 2.6))
 
-    # (a) átomos pesados
-    todos = np.concatenate([v[0] for v in datos.values()])
-    malla_a = np.linspace(0, np.percentile(todos, 99.5) + 4, 400)
-    ax_a.axvspan(*BANDA_MOSES, color="0.5", alpha=0.13, lw=0, zorder=0)
-    for nombre, (pesados, _) in datos.items():
-        ax_a.plot(malla_a, kde(pesados, malla_a), label=nombre, **ESTILOS[nombre])
-    ax_a.set_xlabel("Número de átomos pesados")
-    ax_a.set_ylabel("Densidad")
-    ax_a.set_xlim(malla_a[0], malla_a[-1])
-    ax_a.set_ylim(bottom=0)
+    def panel(ax, indice, etiqueta_x, margen, decimales=0):
+        """Dibuja un panel: banda del corpus, las cuatro densidades y la anotación."""
+        valores = {n: v[indice] for n, v in datos.items()}
+        todos = np.concatenate(list(valores.values()))
+        malla = np.linspace(0, np.percentile(todos, 99.5) + margen, 400)
 
-    # La banda se anota dentro del panel: un lector que mire solo la figura no tiene por
-    # qué saber qué significa el gris.
-    ax_a.annotate(f"{BANDA_MOSES[0]}–{BANDA_MOSES[1]}\n(p5–p95 MOSES)",
-                  xy=(sum(BANDA_MOSES) / 2, ax_a.get_ylim()[1] * 0.92),
-                  ha="center", va="top", fontsize=6.5, color="0.35")
+        lo, hi = np.percentile(valores[REFERENCIA], [5, 95])
+        ax.axvspan(lo, hi, color="0.5", alpha=0.13, lw=0, zorder=0)
+        for nombre, v in valores.items():
+            ax.plot(malla, kde(v, malla), label=nombre, **ESTILOS[nombre])
 
-    # (b) peso molecular
-    todos_mw = np.concatenate([v[1] for v in datos.values()])
-    malla_b = np.linspace(0, np.percentile(todos_mw, 99.5) + 40, 400)
-    for nombre, (_, masa) in datos.items():
-        ax_b.plot(malla_b, kde(masa, malla_b), **ESTILOS[nombre])
-    ax_b.set_xlabel("Peso molecular (g/mol)")
-    ax_b.set_ylabel("Densidad")
-    ax_b.set_xlim(malla_b[0], malla_b[-1])
-    ax_b.set_ylim(bottom=0)
+        ax.set_xlabel(etiqueta_x)
+        ax.set_ylabel("Densidad")
+        ax.set_xlim(malla[0], malla[-1])
+        # Un 22 % de aire por encima de la curva más alta, para que la anotación de la
+        # banda no caiga sobre la densidad del corpus. Sin él, el texto y el pico de
+        # MOSES ocupan el mismo sitio, que es justo donde la banda está.
+        ax.set_ylim(0, max(kde(v, malla).max() for v in valores.values()) * 1.22)
+
+        # La banda se anota dentro del panel: quien mire solo la figura no tiene por qué
+        # saber qué significa el gris.
+        fmt = f"{{:.{decimales}f}}"
+        ax.annotate(f"{fmt.format(lo)}–{fmt.format(hi)}\n(p5–p95 {REFERENCIA})",
+                    xy=((lo + hi) / 2, ax.get_ylim()[1] * 0.99),
+                    ha="center", va="top", fontsize=6.5, color="0.35", linespacing=1.3)
+        return lo, hi
+
+    banda_a = panel(ax_a, 0, "Número de átomos pesados", margen=4)
+    banda_b = panel(ax_b, 1, "Peso molecular (g/mol)", margen=40)
+    print(f"  banda del corpus  átomos pesados {banda_a[0]:.0f}–{banda_a[1]:.0f}   "
+          f"peso molecular {banda_b[0]:.0f}–{banda_b[1]:.0f}")
 
     for ax, etiqueta in ((ax_a, "(a)"), (ax_b, "(b)")):
         ax.text(-0.14, 1.04, etiqueta, transform=ax.transAxes,
@@ -230,7 +244,23 @@ def figura_cobertura(datos: dict, salida: Path, muestra: int, png: bool = False)
                frameon=False, bbox_to_anchor=(0.5, -0.06),
                handlelength=2.4, columnspacing=1.8)
 
-    fig.text(0.99, -0.055, f"Muestra de {muestra:,} moléculas por conjunto".replace(",", " "),
+    # El pie anterior decía "muestra de 20 000 por conjunto", que era falso: los tres
+    # conjuntos de evaluación no llegan a ese tamaño y se grafican enteros. Se construye
+    # de los datos, distinguiendo lo muestreado de lo completo.
+    muestreados = [n for n in datos if totales.get(n, 0) > len(datos[n][0])]
+    completos = [n for n in datos if n not in muestreados]
+    partes = []
+    if muestreados:
+        partes.append("muestra de {} moléculas de {}".format(
+            f"{len(datos[muestreados[0]][0]):,}".replace(",", " "),
+            " y ".join(muestreados)))
+    if completos:
+        partes.append(("{} al completo" if len(completos) == 1 else "{}, al completo").format(
+            ", ".join(completos)))
+    # Solo la primera letra: str.capitalize pasa el resto a minúsculas y convertiría
+    # MOSES y ESOL en moses y esol.
+    pie = "; ".join(partes)
+    fig.text(0.99, -0.055, pie[:1].upper() + pie[1:],
              ha="right", va="bottom", fontsize=6, color="0.45")
 
     fig.tight_layout()
@@ -264,8 +294,8 @@ def main() -> None:
     args = p.parse_args()
 
     configurar_estilo()
-    datos = cargar(args)
-    figura_cobertura(datos, ROOT / args.salida, args.muestra, png=args.png)
+    datos, totales = cargar(args)
+    figura_cobertura(datos, totales, ROOT / args.salida, png=args.png)
 
 
 if __name__ == "__main__":
