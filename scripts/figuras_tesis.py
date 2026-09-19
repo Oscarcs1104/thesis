@@ -8,15 +8,18 @@ peso molecular, corpus frente a los tres conjuntos de evaluación.
 
 Sobre el corpus que se grafica. La figura sostiene la afirmación de que MOSES ocupa una
 banda estrecha y falla por los dos extremos, de modo que graficar por error el corpus
-ampliado con QM9 la contradiría sin que nada lo indicase. El script lee meta.json, avisa
-si el corpus tiene más de una fuente y escribe en la propia figura cuántas moléculas se
-muestrearon. Comprobar cuál se usó no debería requerir recordarlo.
+ampliado con QM9 la contradiría sin que nada lo indicase. El script lee meta.json y avisa
+si el corpus tiene más de una fuente.
+
+La figura no lleva texto sobre tamaños de muestra: eso va en el pie que se redacta aparte.
+Lo que este script imprime al cargar son las cifras que ese pie necesita -- cuántas
+moléculas se usaron de cuántas hay, por conjunto, y las dos bandas del corpus.
 
 La estimación de densidad es un núcleo gaussiano con la regla de Scott, implementado con
 numpy: la biblioteca científica general no forma parte de las dependencias mínimas de
 este trabajo y son diez líneas. Se muestrean --muestra moléculas por conjunto, las mismas
 20 000 con que se calcularon los percentiles del texto, para que figura y tabla no puedan
-discrepar.
+discrepar; los conjuntos más pequeños que ese número se grafican enteros.
 """
 from __future__ import annotations
 
@@ -173,7 +176,12 @@ def cargar(args):
         totales[nombre] = len(df)
         pesados, masa = descriptores(df[col].astype(str), args.muestra, args.semilla)
         datos[nombre] = (pesados, masa)
-        print(f"  {nombre:<14} {len(pesados):>7,} moléculas  "
+        # El recuento va aquí y no dentro de la figura: el pie lo redacta quien escribe,
+        # y lo que necesita de este script son las cifras exactas.
+        cuantas = (f"{len(pesados):,} de {totales[nombre]:,}".replace(",", " ")
+                   if totales[nombre] > len(pesados)
+                   else f"{len(pesados):,} (completo)".replace(",", " "))
+        print(f"  {nombre:<14} {cuantas:<22} "
               f"átomos pesados p5/p50/p95 = "
               f"{np.percentile(pesados, 5):.0f}/{np.percentile(pesados, 50):.0f}/"
               f"{np.percentile(pesados, 95):.0f}  MW mediana {np.median(masa):.0f}")
@@ -190,8 +198,7 @@ def cargar(args):
 # figura 1
 # --------------------------------------------------------------------------------------
 
-def figura_cobertura(datos: dict, totales: dict, salida: Path,
-                     png: bool = False) -> None:
+def figura_cobertura(datos: dict, salida: Path, png: bool = False) -> None:
     # 6.3 pulgadas es el \textwidth habitual de una tesis a una columna con márgenes de
     # 2,5 cm sobre A4. La altura se elige para que los paneles queden algo apaisados, que
     # es lo que conviene a una densidad.
@@ -244,25 +251,6 @@ def figura_cobertura(datos: dict, totales: dict, salida: Path,
                frameon=False, bbox_to_anchor=(0.5, -0.06),
                handlelength=2.4, columnspacing=1.8)
 
-    # El pie anterior decía "muestra de 20 000 por conjunto", que era falso: los tres
-    # conjuntos de evaluación no llegan a ese tamaño y se grafican enteros. Se construye
-    # de los datos, distinguiendo lo muestreado de lo completo.
-    muestreados = [n for n in datos if totales.get(n, 0) > len(datos[n][0])]
-    completos = [n for n in datos if n not in muestreados]
-    partes = []
-    if muestreados:
-        partes.append("muestra de {} moléculas de {}".format(
-            f"{len(datos[muestreados[0]][0]):,}".replace(",", " "),
-            " y ".join(muestreados)))
-    if completos:
-        partes.append(("{} al completo" if len(completos) == 1 else "{}, al completo").format(
-            ", ".join(completos)))
-    # Solo la primera letra: str.capitalize pasa el resto a minúsculas y convertiría
-    # MOSES y ESOL en moses y esol.
-    pie = "; ".join(partes)
-    fig.text(0.99, -0.055, pie[:1].upper() + pie[1:],
-             ha="right", va="bottom", fontsize=6, color="0.45")
-
     fig.tight_layout()
     salida.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(salida, bbox_inches="tight", format="pdf")
@@ -295,7 +283,7 @@ def main() -> None:
 
     configurar_estilo()
     datos, totales = cargar(args)
-    figura_cobertura(datos, totales, ROOT / args.salida, png=args.png)
+    figura_cobertura(datos, ROOT / args.salida, png=args.png)
 
 
 if __name__ == "__main__":
