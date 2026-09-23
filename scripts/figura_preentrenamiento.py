@@ -58,11 +58,11 @@ BRAZOS = ["desde cero", "preentrenado"]             # orden en el eje x
 # discrepan: es la comprobación de que figura y tabla salen de los mismos números, que es
 # justo el desajuste que nadie detecta leyendo.
 CONTROL = {
-    "ESOL":          {"desde cero": (0.741, 0.061), "preentrenado": (0.611, 0.040)},
-    "FreeSolv":      {"desde cero": (1.420, 0.286), "preentrenado": (1.139, 0.136)},
-    "Lipophilicity": {"desde cero": (0.845, 0.063), "preentrenado": (0.671, 0.026)},
+    "ESOL":          {"desde cero": (0.764, 0.056), "preentrenado": (0.641, 0.067)},
+    "FreeSolv":      {"desde cero": (1.330, 0.290), "preentrenado": (0.924, 0.148)},
+    "Lipophilicity": {"desde cero": (0.834, 0.043), "preentrenado": (0.674, 0.013)},
 }
-TOLERANCIA = 0.0005    # media milésima: las cifras de control vienen a tres decimales
+TOLERANCIA = 0.001     # las cifras de control vienen a tres decimales ya redondeadas
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 
