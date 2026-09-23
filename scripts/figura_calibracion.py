@@ -57,12 +57,13 @@ from scripts.figura_preentrenamiento import ajustar_tamano  # noqa: E402
 FUENTE = ROOT / "results" / "calibracion_logp.csv"
 SALIDA = ROOT / "figuras" / "calibracion.pdf"
 
-# Los intervalos que deben estar presentes para cada peso de guía. Si la evaluación
-# numera sus intervalos desde 0 en lugar de desde 1, cámbialo aquí: el script no lo
-# adivina, porque el intervalo 0 significa "sin condición" en una numeración y "primer
-# cuantil" en la otra, y confundirlos borraría un intervalo real sin avisar.
-INTERVALOS = list(range(1, 21))
-NULO = 0                       # el intervalo sin condición, que no se representa
+# Los intervalos que deben estar presentes para cada peso de guía. La evaluación numera
+# sus veinte cuantiles de 0 a 19, y el 0 es un cuantil real, no la ausencia de condición:
+# el control nulo se guarda aparte, en su propio bloque del resumen, y no llega a este
+# CSV. NULO queda por tanto en None, porque no hay nada que descartar; ponlo a un entero
+# solo si el CSV que le pases sí mezcla el nulo entre los intervalos.
+INTERVALOS = list(range(0, 20))
+NULO = None                    # el intervalo sin condición, si es que viene en el CSV
 
 # clave en la columna w -> (etiqueta, color, marcador)
 PESOS = {
@@ -93,10 +94,12 @@ def cargar(fuente: Path) -> pd.DataFrame:
     for c in COLUMNAS:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    n_nulo = int((df["intervalo"] == NULO).sum())
-    df = df[df["intervalo"] != NULO]
-    if n_nulo:
-        print(f"  descartadas {n_nulo} filas del intervalo {NULO} (sin condición)")
+    n_nulo = 0
+    if NULO is not None:
+        n_nulo = int((df["intervalo"] == NULO).sum())
+        df = df[df["intervalo"] != NULO]
+        if n_nulo:
+            print(f"  descartadas {n_nulo} filas del intervalo {NULO} (sin condición)")
 
     df = df[df["w"].isin(PESOS)]
     if df.empty:
