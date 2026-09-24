@@ -96,7 +96,17 @@ from data_pipeline.features_pretrain_gnn import smiles_to_data_pretrain  # noqa:
 # 'hybrid' is the thesis's own encoder, trained from scratch, and the only row whose
 # checkpoint can go on to initialize the generation half: the others use the Hu et al.
 # 2+2 featurization and have no character-level SMILES branch.
-ALL_CONFIGS = tuple(CONFIGS) + ("hybrid", "mola", "mola-fixed")
+# The thesis encoder and its two single-modality ablations. All three are the same
+# architecture and load the same pretrained checkpoint; the only difference is which
+# branch is switched on, which is what makes the comparison an ablation rather than a
+# comparison of three different models.
+MODALIDADES = {
+    "hybrid":      (True, True),
+    "graph-only":  (True, False),
+    "smiles-only": (False, True),
+}
+
+ALL_CONFIGS = tuple(CONFIGS) + tuple(MODALIDADES) + ("mola", "mola-fixed")
 
 CSV_FIELDS = ["dataset", "config", "seed", "pretrained", "init_tag", "split_protocol", "n_pool",
               "rmse", "mae", "nrmse", "r2",
@@ -335,7 +345,8 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
     device = args.device
     start = time.time()
 
-    is_hybrid = config == "hybrid"
+    is_hybrid = config in MODALIDADES
+    use_graph, use_smiles = MODALIDADES.get(config, (True, True))
     init_ckpt = None
     char_vocab = None
     if args.init_checkpoint:
@@ -399,11 +410,13 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
             positional_smiles=(config == "mola-fixed"), max_sm_len=100,
         ).to(device)
     elif is_hybrid:
-        model = HybridMoLA(
+        kwargs_hibrido = dict(
             sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
             num_layers=num_layers, positional_smiles=True, max_sm_len=100,
             gin_hidden_mult=gin_mult,
-        ).to(device)
+        )
+        model = HybridMoLA(**kwargs_hibrido,
+                           use_graph=use_graph, use_smiles=use_smiles).to(device)
     else:
         model = build_config(
             config, hidden_dim=hidden_dim, output_dim=1, num_layers=num_layers,
@@ -423,6 +436,21 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         state = {k: v for k, v in ckpt["model_state_dict"].items() if not k.startswith(head_prefix)}
         missing, unexpected = model.load_state_dict(state, strict=False)
         real_missing = [k for k in missing if not k.startswith(head_prefix)]
+
+        # A single-modality row legitimately has no parameters for the branch it turned
+        # off, so the full checkpoint brings keys it cannot place. Those are permitted,
+        # but only those: the permitted set is computed from a full hybrid rather than
+        # matched by name prefix, so a genuine mismatch cannot hide behind the exception.
+        if is_hybrid and not (use_graph and use_smiles):
+            completo = HybridMoLA(**kwargs_hibrido)
+            permitidas = set(completo.state_dict()) - set(model.state_dict())
+            del completo
+            sobran = [k for k in unexpected if k not in permitidas]
+            if not sobran:
+                print(f"  {len(unexpected)} tensores de la rama desactivada descartados "
+                      f"({config})")
+            unexpected = sobran
+
         if real_missing or unexpected:
             raise SystemExit("pretrained init did not load cleanly\n"
                              f"  missing:    {real_missing}\n"
