@@ -434,6 +434,37 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         # HybridMoLA's regression head is out_layer_final; PretrainedMoLA's is head.
         head_prefix = "out_layer_final." if is_hybrid else "head."
         state = {k: v for k, v in ckpt["model_state_dict"].items() if not k.startswith(head_prefix)}
+        if is_hybrid and not (use_graph and use_smiles):
+            # layer_weights lleva una fila por capa Y por modalidad, apiladas como
+            # [L0 grafo, L0 SMILES, L1 grafo, ...]. Desactivar una rama la reduce a la
+            # mitad, de modo que se recortan las filas de la rama que queda en lugar de
+            # descartar el tensor: descartarlo reiniciaria los pesos de MoLA a unos y
+            # perderia parte del preentrenamiento sin decirlo.
+            w = state.get("layer_weights")
+            if w is not None:
+                recortado = w[0::2] if use_graph else w[1::2]
+                esperado = tuple(model.layer_weights.shape)
+                if tuple(recortado.shape) != esperado:
+                    raise SystemExit(
+                        f"layer_weights del checkpoint tiene forma {tuple(w.shape)}; al "
+                        f"quedarse con la rama {'grafo' if use_graph else 'SMILES'} "
+                        f"resulta {tuple(recortado.shape)} y el modelo espera {esperado}. "
+                        f"El orden de apilado no es el supuesto."
+                    )
+                state["layer_weights"] = recortado
+
+        # Las formas se comprueban antes de cargar. load_state_dict las notifica en un
+        # RuntimeError que no dice de que configuracion viene el checkpoint, y ese fue
+        # justo el error que se comio layer_weights la primera vez.
+        formas_modelo = {k: tuple(v.shape) for k, v in model.state_dict().items()}
+        chocan = [(k, tuple(v.shape), formas_modelo[k])
+                  for k, v in state.items()
+                  if k in formas_modelo and tuple(v.shape) != formas_modelo[k]]
+        if chocan:
+            detalle = "\n".join(f"    {k}: checkpoint {a}, modelo {b}" for k, a, b in chocan)
+            raise SystemExit(f"el checkpoint no encaja con la configuracion {config!r}:\n"
+                             f"{detalle}")
+
         missing, unexpected = model.load_state_dict(state, strict=False)
         real_missing = [k for k in missing if not k.startswith(head_prefix)]
 
