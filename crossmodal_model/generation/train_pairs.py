@@ -166,6 +166,9 @@ def main() -> None:
     # fails at load time with a shape error rather than anywhere informative.
     hidden_dim, num_layers = args.hidden_dim, args.num_layers
     gin_mult = args.gin_hidden_mult
+    # Por defecto fuera del bloque que carga el checkpoint: las filas desde cero no
+    # tienen checkpoint del que leerlo y el modelo se construye igualmente.
+    normalizar = False
     ck = None
     if args.init_encoder:
         ck = torch.load(args.init_encoder, map_location="cpu", weights_only=False)
@@ -176,6 +179,8 @@ def main() -> None:
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim} -> {ck_hidden}, "
                   f"layers {num_layers} -> {ck_layers}")
         ck_mult = int(ck.get("gin_hidden_mult", ck_args.get("gin_hidden_mult", 1)))
+        normalizar = bool(ck.get("normalize_branches",
+                                 ck_args.get("normalize_branches", False)))
         if ck_mult != gin_mult:
             print(f"  GIN width multiplier taken from the checkpoint: {gin_mult} -> {ck_mult}")
         hidden_dim, num_layers, gin_mult = ck_hidden, ck_layers, ck_mult
@@ -185,6 +190,7 @@ def main() -> None:
         num_layers=num_layers, positional_smiles=True, max_sm_len=args.max_sm_len,
         use_graph=args.use_graph, use_smiles=args.use_smiles,
         gin_hidden_mult=gin_mult,
+        normalize_branches=normalizar,
     )
     model = ConditionalMoleculeGenerator(
         mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=hidden_dim, pad_idx=pad_idx,
@@ -308,6 +314,7 @@ def main() -> None:
                     # args alone would get the wrong width and fail at load.
                     "hidden_dim": hidden_dim, "num_layers": num_layers,
                     "gin_hidden_mult": gin_mult,
+                    "normalize_branches": normalizar,
                     "fusion_in_memory": bool(args.fusion_in_memory),
                     "arm": arm, "vocab": vocab, "char_vocab": cache.char_vocab,
                     "binners": {k: v.state_dict() for k, v in binners.items()},

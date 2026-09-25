@@ -360,6 +360,9 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
     # trained in, never this script's default.
     hidden_dim, num_layers = args.hidden_dim, args.num_layers
     gin_mult = args.gin_hidden_mult
+    # Por defecto fuera del bloque que carga el checkpoint: las filas desde cero no
+    # tienen checkpoint del que leerlo y el modelo se construye igualmente.
+    normalizar = False
     if init_ckpt is not None:
         ck_args = init_ckpt.get("args", {})
         hidden_dim = int(ck_args.get("hidden_dim", hidden_dim))
@@ -367,6 +370,11 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
         # Same reason as hidden/layers: the pretrained weights only fit the shape they
         # were trained in, and the GIN MLP width is part of that shape.
         gin_mult = int(init_ckpt.get("gin_hidden_mult", ck_args.get("gin_hidden_mult", gin_mult)))
+        # Del checkpoint y no de un argumento: normalizar en el preentrenamiento y no
+        # en el ajuste fino cambiaria la arquitectura a mitad de camino, y los pesos
+        # cargarian sin protestar porque la normalizacion no anade parametros.
+        normalizar = bool(init_ckpt.get("normalize_branches",
+                                        ck_args.get("normalize_branches", False)))
         if (hidden_dim, num_layers) != (args.hidden_dim, args.num_layers):
             print(f"  encoder dims taken from the checkpoint: hidden {hidden_dim}, layers {num_layers}")
 
@@ -414,6 +422,7 @@ def run_one(dataset: str, config: str, seed: int, args, group: str) -> Dict[str,
             sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
             num_layers=num_layers, positional_smiles=True, max_sm_len=100,
             gin_hidden_mult=gin_mult,
+            normalize_branches=normalizar,
         )
         model = HybridMoLA(**kwargs_hibrido,
                            use_graph=use_graph, use_smiles=use_smiles).to(device)

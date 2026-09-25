@@ -220,12 +220,14 @@ def load_generator(ckpt_path: Path, device: str):
     num_layers = int(ck.get("num_layers", a.get("num_layers", 3)))
     max_sm_len = int(a.get("max_sm_len", 100))
     gin_mult = int(ck.get("gin_hidden_mult", a.get("gin_hidden_mult", 1)))
+    normalizar = bool(ck.get("normalize_branches", a.get("normalize_branches", False)))
 
     mola = HybridMoLA(
         sm_vocab_size=len(char_vocab), hidden_dim=hidden_dim, output_dim=1,
         num_layers=num_layers, positional_smiles=True, max_sm_len=max_sm_len,
         use_graph=bool(a.get("use_graph", True)), use_smiles=bool(a.get("use_smiles", True)),
         gin_hidden_mult=gin_mult,
+        normalize_branches=normalizar,
     )
     model = ConditionalMoleculeGenerator(
         mola, vocab_size=len(vocab["token_to_id"]), hidden_dim=hidden_dim,

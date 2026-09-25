@@ -132,6 +132,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ckpt-every-min", type=float, default=30.0)
     p.add_argument("--hidden-dim", type=int, default=256)
     p.add_argument("--num-layers", type=int, default=3)
+    p.add_argument("--normalize-branches", action="store_true",
+                   help="normaliza cada rama antes de fusionarla, para que los pesos "
+                        "de MoLA expresen preferencia y no compensen escala")
     p.add_argument("--gin-hidden-mult", type=int, default=8,
                    help="widens the GIN update MLP's inner layer to hidden_dim * this. 8 matches "
                         "the SMILES branch's feedforward block, which defaults to "
@@ -278,6 +281,7 @@ def main() -> None:
             positional_smiles=True, max_sm_len=cache.sm.shape[1],
             use_graph=args.use_graph, use_smiles=args.use_smiles,
             gin_hidden_mult=args.gin_hidden_mult,
+            normalize_branches=args.normalize_branches,
         ).to(device)
         print(f"  arch=hybrid ({tag}), everything from scratch")
     else:
@@ -385,6 +389,7 @@ def main() -> None:
                     # the same shape. A mismatch is a load-time shape error, which is
                     # the right failure, but only if the value travels with the weights.
                     "gin_hidden_mult": args.gin_hidden_mult,
+                    "normalize_branches": args.normalize_branches,
                     "step": step, "args": vars(args), "history": history,
                     # Needed by the fine-tune: without them the pretrained head predicts
                     # in standardized space and its outputs are meaningless.

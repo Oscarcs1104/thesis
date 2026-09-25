@@ -35,11 +35,24 @@ class HybridEncoder(nn.Module):
         use_graph: bool = True,
         use_smiles: bool = True,
         gin_hidden_mult: int = 1,
+        normalize_branches: bool = False,
     ) -> None:
         super().__init__()
         if not use_graph and not use_smiles:
             raise ValueError("HybridEncoder needs at least one of use_graph/use_smiles enabled")
         self.num_layers = num_layers
+        # Both branches on the same scale before they are fused. Measured on the
+        # pretrained encoder, the SMILES term's mean norm exceeds the graph term's by
+        # 42%, so cross-layer attention cannot express a preference between them without
+        # first cancelling that difference: a weight of 0.5 on a vector twice as long is
+        # not half the influence. Normalising leaves layer_weights meaning what its name
+        # says.
+        #
+        # Affine is off on purpose. A learnable scale could grow one branch again and
+        # restore exactly the imbalance this is meant to remove. It also means no new
+        # parameters, so a checkpoint from either variant loads into the other without
+        # missing or unexpected keys -- the behaviour differs, the state_dict does not.
+        self.normalize_branches = normalize_branches
         self.use_graph = use_graph
         self.use_smiles = use_smiles
         self.tokens_per_layer = int(use_graph) + int(use_smiles)
@@ -72,6 +85,12 @@ class HybridEncoder(nn.Module):
             self.sm_embedding = nn.Embedding(sm_vocab_size, hidden_dim, padding_idx=0)
             self.sm_layers = nn.ModuleList([_sm_transformer() for _ in range(num_layers)])
             self.sm_dropout = nn.Dropout(0.3)
+
+    def _escala(self, t: torch.Tensor) -> torch.Tensor:
+        """Normaliza el token de una rama antes de fusionarlo, si la opción está activa."""
+        if not self.normalize_branches:
+            return t
+        return F.layer_norm(t, t.shape[-1:])
 
     def _pool_sm(self, sm_x: torch.Tensor, keep: Optional[torch.Tensor]) -> torch.Tensor:
         if keep is None:
@@ -121,13 +140,13 @@ class HybridEncoder(nn.Module):
         for layer_idx in range(self.num_layers):
             tokens = []
             if self.use_graph:
-                tokens.append(layer_graph_states[layer_idx])
+                tokens.append(self._escala(layer_graph_states[layer_idx]))
             if self.use_smiles:
                 h_sm = self.sm_layers[layer_idx](h_sm, src_key_padding_mask=pad_mask)
                 h_sm = F.relu(h_sm)
                 sm_feat = self._pool_sm(h_sm, keep)
                 h_sm = self.sm_dropout(h_sm)
-                tokens.append(sm_feat)
+                tokens.append(self._escala(sm_feat))
             fused_out_list.append(torch.stack(tokens, dim=0))
 
         fused_all = torch.cat(fused_out_list, dim=0)
