@@ -73,7 +73,14 @@ def cambiados(a, b):
     return sorted(set(range(b.GetNumAtoms())) - set(comunes))
 
 
-def dibujar(smiles: str, resaltar=None, px: int = PX):
+def dibujar(smiles: str, resaltar=None, px: int = PX, longitud_enlace: float = 0.0):
+    """Estructura como matriz RGB.
+
+    longitud_enlace fija los pixeles por enlace en lugar de dejar que RDKit escale cada
+    molecula hasta llenar su recuadro. Sin ella, una molecula de cuatro atomos y una de
+    treinta salen del mismo tamano, lo que da igual cuando se comparan dos analogos y
+    borra el argumento cuando lo que se compara son conjuntos de tamanos distintos.
+    """
     from rdkit import Chem, RDLogger
     from rdkit.Chem import Draw
     from rdkit.Chem.Draw import rdMolDraw2D
@@ -88,6 +95,8 @@ def dibujar(smiles: str, resaltar=None, px: int = PX):
     try:
         d = rdMolDraw2D.MolDraw2DCairo(px, px)
         d.drawOptions().clearBackground = False
+        if longitud_enlace > 0:
+            d.drawOptions().fixedBondLength = longitud_enlace
         rdMolDraw2D.PrepareAndDrawMolecule(
             d, mol, highlightAtoms=resaltar,
             highlightAtomColors={i: RESALTE for i in resaltar})
