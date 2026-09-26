@@ -1,0 +1,19 @@
+conjunto,semilla,pesos,rmse
+ESOL,2025,desde cero,0.7837432749093137
+ESOL,2026,desde cero,0.7014504307059183
+ESOL,2027,desde cero,0.8082977711500637
+FreeSolv,2025,desde cero,1.2873159425151142
+FreeSolv,2026,desde cero,1.638599416883587
+FreeSolv,2027,desde cero,1.062936805246211
+Lipophilicity,2025,desde cero,0.7959647870637767
+Lipophilicity,2026,desde cero,0.824522170493409
+Lipophilicity,2027,desde cero,0.8801908472494968
+ESOL,2025,preentrenado,0.7115948331554174
+ESOL,2026,preentrenado,0.6349729463491268
+ESOL,2027,preentrenado,0.5779093778444414
+FreeSolv,2025,preentrenado,1.046094973893194
+FreeSolv,2026,preentrenado,0.9657992060778324
+FreeSolv,2027,preentrenado,0.7592787960320717
+Lipophilicity,2025,preentrenado,0.6884685542946264
+Lipophilicity,2026,preentrenado,0.6650340210307603
+Lipophilicity,2027,preentrenado,0.6677187847880671

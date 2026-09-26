@@ -1,0 +1,126 @@
+checkpoint pairs_graph_smiles_scratch_s2025.pt | arm graph+smiles | step 60000
+conditioning on logp: 20 bins, null at 20
+Loaded graph cache from /home/juanjo-malvado/thesis/data/moses_solo/molecule_graph_cache_ogb.npz (1,936,381 molecules)
+Split by scaffold: train=12,401,262 val=285,749 test=301,602 pairs over 448,901 scaffolds
+100 seed molecules from the test split (33,993 available)
+4,200 generations: 2 guidance x 21 requests x 100 seeds
+  w=1.0 null  20     100/4,200  (1s)
+  w=1.0 bin   0     200/4,200  (1s)
+  w=1.0 bin   1     300/4,200  (1s)
+  w=1.0 bin   2     400/4,200  (1s)
+  w=1.0 bin   3     500/4,200  (2s)
+  w=1.0 bin   4     600/4,200  (2s)
+  w=1.0 bin   5     700/4,200  (2s)
+  w=1.0 bin   6     800/4,200  (3s)
+  w=1.0 bin   7     900/4,200  (3s)
+  w=1.0 bin   8   1,000/4,200  (3s)
+  w=1.0 bin   9   1,100/4,200  (3s)
+  w=1.0 bin  10   1,200/4,200  (4s)
+  w=1.0 bin  11   1,300/4,200  (4s)
+  w=1.0 bin  12   1,400/4,200  (4s)
+  w=1.0 bin  13   1,500/4,200  (5s)
+  w=1.0 bin  14   1,600/4,200  (5s)
+  w=1.0 bin  15   1,700/4,200  (5s)
+  w=1.0 bin  16   1,800/4,200  (5s)
+  w=1.0 bin  17   1,900/4,200  (6s)
+  w=1.0 bin  18   2,000/4,200  (6s)
+  w=1.0 bin  19   2,100/4,200  (6s)
+  w=3.0 null  20   2,200/4,200  (7s)
+  w=3.0 bin   0   2,300/4,200  (8s)
+  w=3.0 bin   1   2,400/4,200  (9s)
+  w=3.0 bin   2   2,500/4,200  (10s)
+  w=3.0 bin   3   2,600/4,200  (10s)
+  w=3.0 bin   4   2,700/4,200  (11s)
+  w=3.0 bin   5   2,800/4,200  (11s)
+  w=3.0 bin   6   2,900/4,200  (12s)
+  w=3.0 bin   7   3,000/4,200  (12s)
+  w=3.0 bin   8   3,100/4,200  (13s)
+  w=3.0 bin   9   3,200/4,200  (13s)
+  w=3.0 bin  10   3,300/4,200  (15s)
+  w=3.0 bin  11   3,400/4,200  (15s)
+  w=3.0 bin  12   3,500/4,200  (16s)
+  w=3.0 bin  13   3,600/4,200  (16s)
+  w=3.0 bin  14   3,700/4,200  (17s)
+  w=3.0 bin  15   3,800/4,200  (17s)
+  w=3.0 bin  16   3,900/4,200  (18s)
+  w=3.0 bin  17   4,000/4,200  (18s)
+  w=3.0 bin  18   4,100/4,200  (19s)
+  w=3.0 bin  19   4,200/4,200  (19s)
+
+==============================================================================
+graph+smiles | conditioning on logp | 100 seeds
+==============================================================================
+
+guidance w = 1.0
+  spearman(requested bin, obtained delta) : +0.811   <- the number that answers the question
+  slope (obtained per unit requested)     : +0.900   <- 1.0 would be perfect obedience
+  MAE vs bin centre                       : 0.304
+  validity / uniqueness / novelty         : 1.000 / 0.930 / 0.854
+  copy rate / mean Tanimoto to seed       : 0.040 / 0.520
+  null control delta                      : -0.263 +/- 0.763
+
+  Per bin. The first and last bins are open intervals, so their 'asked'
+  centre is an extrapolation and their MAE is not comparable to the middle
+  ones -- read the hit rate there instead. Middle bins are narrow by
+  construction (20 quantiles of the delta distribution), so a low hit rate
+  there is bin width as much as it is the model.
+
+   bin     asked  got (mean)      sd    hit   copy  tanimoto
+     0    -1.296      -1.409   0.635  0.720  0.010     0.468
+     1    -0.985      -1.011   0.467  0.310  0.000     0.473
+     2    -0.738      -0.810   0.370  0.290  0.000     0.505
+     3    -0.580      -0.666   0.413  0.150  0.010     0.508
+     4    -0.452      -0.433   0.431  0.210  0.010     0.509
+     5    -0.347      -0.352   0.333  0.200  0.050     0.563
+     6    -0.255      -0.311   0.330  0.200  0.030     0.516
+     7    -0.166      -0.305   0.393  0.150  0.040     0.552
+     8    -0.069      -0.160   0.401  0.060  0.030     0.522
+     9    -0.007      -0.119   0.362  0.150  0.090     0.550
+    10    +0.007      -0.034   0.371  0.040  0.430     0.766
+    11    +0.069      -0.037   0.407  0.150  0.040     0.536
+    12    +0.166      +0.116   0.368  0.190  0.010     0.535
+    13    +0.255      +0.137   0.415  0.120  0.020     0.521
+    14    +0.347      +0.267   0.397  0.200  0.040     0.528
+    15    +0.452      +0.347   0.358  0.220  0.010     0.507
+    16    +0.580      +0.445   0.452  0.160  0.010     0.466
+    17    +0.738      +0.488   0.536  0.130  0.020     0.490
+    18    +0.985      +0.683   0.466  0.260  0.000     0.473
+    19    +1.296      +0.971   0.667  0.420  0.000     0.453
+
+guidance w = 3.0
+  spearman(requested bin, obtained delta) : +0.856   <- the number that answers the question
+  slope (obtained per unit requested)     : +1.145   <- 1.0 would be perfect obedience
+  MAE vs bin centre                       : 0.304
+  validity / uniqueness / novelty         : 1.000 / 0.950 / 0.874
+  copy rate / mean Tanimoto to seed       : 0.038 / 0.490
+  null control delta                      : -0.181 +/- 0.761
+
+  Per bin. The first and last bins are open intervals, so their 'asked'
+  centre is an extrapolation and their MAE is not comparable to the middle
+  ones -- read the hit rate there instead. Middle bins are narrow by
+  construction (20 quantiles of the delta distribution), so a low hit rate
+  there is bin width as much as it is the model.
+
+   bin     asked  got (mean)      sd    hit   copy  tanimoto
+     0    -1.296      -1.841   0.575  0.940  0.000     0.431
+     1    -0.985      -1.151   0.511  0.460  0.000     0.462
+     2    -0.738      -0.940   0.389  0.280  0.000     0.468
+     3    -0.580      -0.726   0.418  0.180  0.000     0.457
+     4    -0.452      -0.531   0.382  0.260  0.000     0.502
+     5    -0.347      -0.402   0.355  0.280  0.010     0.527
+     6    -0.255      -0.386   0.492  0.150  0.020     0.500
+     7    -0.166      -0.180   0.380  0.220  0.050     0.522
+     8    -0.069      -0.199   0.400  0.160  0.010     0.463
+     9    -0.007      -0.111   0.570  0.180  0.050     0.501
+    10    +0.007      -0.048   0.314  0.020  0.570     0.821
+    11    +0.069      -0.003   0.398  0.190  0.010     0.489
+    12    +0.166      +0.099   0.378  0.170  0.040     0.515
+    13    +0.255      +0.294   0.328  0.300  0.010     0.516
+    14    +0.347      +0.434   0.414  0.200  0.010     0.471
+    15    +0.452      +0.446   0.506  0.210  0.000     0.458
+    16    +0.580      +0.662   0.298  0.160  0.000     0.451
+    17    +0.738      +0.684   0.590  0.320  0.000     0.425
+    18    +0.985      +0.899   0.689  0.300  0.000     0.426
+    19    +1.296      +1.296   0.681  0.720  0.000     0.380
+
+Wrote /home/juanjo-malvado/thesis/results/oracle/pairs_graph_smiles_scratch_s2025_logp/generations.csv and /home/juanjo-malvado/thesis/results/oracle/pairs_graph_smiles_scratch_s2025_logp/summary.json

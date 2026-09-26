@@ -1,0 +1,67 @@
+nohup: ignoring input
+Read 1936962 SMILES from /home/juanjo-malvado/thesis/data/moses/dataset_v1.csv
+  + 133,802 from data/qm9.csv
+  union before canonicalization: 2,070,764 SMILES from 2 sources
+Canonicalizing + SELFIES-encoding on 32 workers...
+  prepared: 100000/2070764 (2s)
+  prepared: 200000/2070764 (4s)
+  prepared: 300000/2070764 (6s)
+  prepared: 400000/2070764 (8s)
+  prepared: 500000/2070764 (9s)
+  prepared: 600000/2070764 (11s)
+  prepared: 700000/2070764 (13s)
+  prepared: 800000/2070764 (14s)
+  prepared: 900000/2070764 (16s)
+  prepared: 1000000/2070764 (18s)
+  prepared: 1100000/2070764 (19s)
+  prepared: 1200000/2070764 (21s)
+  prepared: 1300000/2070764 (23s)
+  prepared: 1400000/2070764 (24s)
+  prepared: 1500000/2070764 (26s)
+  prepared: 1600000/2070764 (28s)
+  prepared: 1700000/2070764 (29s)
+  prepared: 1800000/2070764 (31s)
+  prepared: 1900000/2070764 (33s)
+  prepared: 2000000/2070764 (34s)
+  prepared: 2070764/2070764 (34s)
+  kept 2070764, rejected 0 (unparseable or not SELFIES-representable)
+  4747 internal duplicates (same InChIKey) merged -> 2066017
+Checking overlap with the esol/freesolv/lipo TEST splits...
+  esol: 1117 molecules excluded from the corpus
+  freesolv: 642 molecules excluded from the corpus
+  lipo: 4200 molecules excluded from the corpus
+  removed 521 molecules present in a test split: {'esol': 279, 'freesolv': 228, 'lipo': 173}
+Computing Murcko scaffolds for the overlap report...
+  scaffolds: 100000/2065496 (1s)
+  scaffolds: 200000/2065496 (2s)
+  scaffolds: 300000/2065496 (2s)
+  scaffolds: 400000/2065496 (3s)
+  scaffolds: 500000/2065496 (3s)
+  scaffolds: 600000/2065496 (3s)
+  scaffolds: 700000/2065496 (4s)
+  scaffolds: 800000/2065496 (4s)
+  scaffolds: 900000/2065496 (5s)
+  scaffolds: 1000000/2065496 (5s)
+  scaffolds: 1100000/2065496 (6s)
+  scaffolds: 1200000/2065496 (6s)
+  scaffolds: 1300000/2065496 (7s)
+  scaffolds: 1400000/2065496 (7s)
+  scaffolds: 1500000/2065496 (8s)
+  scaffolds: 1600000/2065496 (8s)
+  scaffolds: 1700000/2065496 (9s)
+  scaffolds: 1800000/2065496 (9s)
+  scaffolds: 1900000/2065496 (10s)
+  scaffolds: 2000000/2065496 (10s)
+  scaffolds: 2065496/2065496 (10s)
+  735 scaffolds shared with the test sets, covering 326220 corpus molecules (15.8%) -- reported, not removed
+SELFIES token length: median=34 p99=44 max=55  ->  max_len=45 (6608 molecules truncated)
+Vocabulary: 40 tokens (4 special, 36 SELFIES -- all of them decodable)
+Encoding to int16...
+  encoded: 500000/2065496 (1s)
+  encoded: 1000000/2065496 (1s)
+  encoded: 1500000/2065496 (2s)
+  encoded: 2000000/2065496 (2s)
+
+Wrote 2065496 molecules to /home/juanjo-malvado/thesis/data/moses
+  tokens (2065496, 45) int16 (186 MB)
+Next: python data_pipeline/rdkit_labels.py --corpus-dir data/moses

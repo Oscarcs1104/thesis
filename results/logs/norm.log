@@ -1,0 +1,177 @@
+nohup: ignoring input
+
+=== esol | hybrid | seed 2025 ===
+    [esol seed 2025] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5804 mae=0.4040 r2=0.9174 (19s, best epoch 39, 7,724,554/7,724,554 trainable)
+
+=== esol | hybrid | seed 2026 ===
+    [esol seed 2026] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.6182 mae=0.4182 r2=0.9177 (15s, best epoch 27, 7,724,554/7,724,554 trainable)
+
+=== esol | hybrid | seed 2027 ===
+    [esol seed 2027] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5748 mae=0.4356 r2=0.9117 (15s, best epoch 29, 7,724,554/7,724,554 trainable)
+
+=== esol | graph-only | seed 2025 ===
+    [esol seed 2025] repartitioned: train=902 valid=113 test=113
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.7164 mae=0.5021 r2=0.8742 (8s, best epoch 44, 3,746,823/3,746,823 trainable)
+
+=== esol | graph-only | seed 2026 ===
+    [esol seed 2026] repartitioned: train=902 valid=113 test=113
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.7276 mae=0.5077 r2=0.8860 (8s, best epoch 37, 3,746,823/3,746,823 trainable)
+
+=== esol | graph-only | seed 2027 ===
+    [esol seed 2027] repartitioned: train=902 valid=113 test=113
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5538 mae=0.4101 r2=0.9181 (7s, best epoch 36, 3,746,823/3,746,823 trainable)
+
+=== esol | smiles-only | seed 2025 ===
+    [esol seed 2025] repartitioned: train=902 valid=113 test=113
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.7268 mae=0.5300 r2=0.8705 (14s, best epoch 41, 4,505,092/4,505,092 trainable)
+
+=== esol | smiles-only | seed 2026 ===
+    [esol seed 2026] repartitioned: train=902 valid=113 test=113
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.7861 mae=0.5764 r2=0.8670 (10s, best epoch 23, 4,505,092/4,505,092 trainable)
+
+=== esol | smiles-only | seed 2027 ===
+    [esol seed 2027] repartitioned: train=902 valid=113 test=113
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.7619 mae=0.5876 r2=0.8449 (9s, best epoch 13, 4,505,092/4,505,092 trainable)
+
+=== freesolv | hybrid | seed 2025 ===
+    [freesolv seed 2025] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.9162 mae=0.5257 r2=0.9209 (9s, best epoch 32, 7,724,554/7,724,554 trainable)
+
+=== freesolv | hybrid | seed 2026 ===
+    [freesolv seed 2026] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.1447 mae=0.7697 r2=0.9122 (7s, best epoch 19, 7,724,554/7,724,554 trainable)
+
+=== freesolv | hybrid | seed 2027 ===
+    [freesolv seed 2027] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.0647 mae=0.6207 r2=0.9043 (7s, best epoch 17, 7,724,554/7,724,554 trainable)
+
+=== freesolv | graph-only | seed 2025 ===
+    [freesolv seed 2025] repartitioned: train=513 valid=64 test=65
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.1635 mae=0.6731 r2=0.8724 (4s, best epoch 28, 3,746,823/3,746,823 trainable)
+
+=== freesolv | graph-only | seed 2026 ===
+    [freesolv seed 2026] repartitioned: train=513 valid=64 test=65
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.2059 mae=0.7420 r2=0.9025 (3s, best epoch 21, 3,746,823/3,746,823 trainable)
+
+=== freesolv | graph-only | seed 2027 ===
+    [freesolv seed 2027] repartitioned: train=513 valid=64 test=65
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.1026 mae=0.6138 r2=0.8973 (4s, best epoch 31, 3,746,823/3,746,823 trainable)
+
+=== freesolv | smiles-only | seed 2025 ===
+    [freesolv seed 2025] repartitioned: train=513 valid=64 test=65
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.5684 mae=1.1661 r2=0.7681 (5s, best epoch 15, 4,505,092/4,505,092 trainable)
+
+=== freesolv | smiles-only | seed 2026 ===
+    [freesolv seed 2026] repartitioned: train=513 valid=64 test=65
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.5040 mae=1.1080 r2=0.8484 (5s, best epoch 16, 4,505,092/4,505,092 trainable)
+
+=== freesolv | smiles-only | seed 2027 ===
+    [freesolv seed 2027] repartitioned: train=513 valid=64 test=65
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=1.4158 mae=1.0048 r2=0.8307 (6s, best epoch 21, 4,505,092/4,505,092 trainable)
+
+=== lipo | hybrid | seed 2025 ===
+    [lipo seed 2025] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5724 mae=0.4317 r2=0.7810 (63s, best epoch 27, 7,724,554/7,724,554 trainable)
+
+=== lipo | hybrid | seed 2026 ===
+    [lipo seed 2026] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5891 mae=0.4500 r2=0.7635 (70s, best epoch 33, 7,724,554/7,724,554 trainable)
+
+=== lipo | hybrid | seed 2027 ===
+    [lipo seed 2027] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.6236 mae=0.4576 r2=0.7284 (61s, best epoch 25, 7,724,554/7,724,554 trainable)
+
+=== lipo | graph-only | seed 2025 ===
+    [lipo seed 2025] repartitioned: train=3360 valid=420 test=420
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5550 mae=0.3978 r2=0.7941 (52s, best epoch 66, 3,746,823/3,746,823 trainable)
+
+=== lipo | graph-only | seed 2026 ===
+    [lipo seed 2026] repartitioned: train=3360 valid=420 test=420
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.5689 mae=0.4240 r2=0.7794 (42s, best epoch 49, 3,746,823/3,746,823 trainable)
+
+=== lipo | graph-only | seed 2027 ===
+    [lipo seed 2027] repartitioned: train=3360 valid=420 test=420
+  38 tensores de la rama desactivada descartados (graph-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.6144 mae=0.4477 r2=0.7363 (28s, best epoch 23, 3,746,823/3,746,823 trainable)
+
+=== lipo | smiles-only | seed 2025 ===
+    [lipo seed 2025] repartitioned: train=3360 valid=420 test=420
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.9659 mae=0.7611 r2=0.3764 (31s, best epoch 10, 4,505,092/4,505,092 trainable)
+
+=== lipo | smiles-only | seed 2026 ===
+    [lipo seed 2026] repartitioned: train=3360 valid=420 test=420
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.9773 mae=0.7513 r2=0.3491 (55s, best epoch 43, 4,505,092/4,505,092 trainable)
+
+=== lipo | smiles-only | seed 2027 ===
+    [lipo seed 2027] repartitioned: train=3360 valid=420 test=420
+  48 tensores de la rama desactivada descartados (smiles-only)
+  initialized from checkpoints/pretrain_moses/hybrid_norm_s2025.pt (step 40000), head reset
+  rmse=0.9685 mae=0.7466 r2=0.3449 (33s, best epoch 13, 4,505,092/4,505,092 trainable)
+
+WARNING: pretrained_ablation_norm.csv now mixes rows measured over different pools. Those are different benchmarks:
+    graph-only     pool   642  3 rows
+    graph-only     pool  1128  3 rows
+    graph-only     pool  4200  3 rows
+    hybrid         pool   642  3 rows
+    hybrid         pool  1128  3 rows
+    hybrid         pool  4200  3 rows
+    smiles-only    pool   642  3 rows
+    smiles-only    pool  1128  3 rows
+    smiles-only    pool  4200  3 rows
+  summarize_results.py splits them; rows written before n_pool existed carry no such information and cannot be separated after the fact.
+
+==============================================================================
+RMSE, mean +/- std over seeds (lower is better)
+==============================================================================
+config                          esol            freesolv                lipo
+----------------------------------------------------------------------------
+hybrid                  0.591 +/-0.024        1.042 +/-0.116        0.595 +/-0.026
+graph-only              0.666 +/-0.097        1.157 +/-0.052        0.579 +/-0.031
+smiles-only             0.758 +/-0.030        1.496 +/-0.077        0.971 +/-0.006
+
+Wrote results/pretrained_ablation_norm.csv

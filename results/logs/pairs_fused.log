@@ -1,0 +1,76 @@
+nohup: ignoring input
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/juanjo-malvado/.netrc.
+wandb: Currently logged in as: juan2220049 (juan2220049-universidad-industrial-de-santander) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Using a boolean value for 'reinit' is deprecated. Use 'return_previous' or 'finish_previous' instead.
+wandb: setting up run pjcot368
+wandb: Tracking run with wandb version 0.30.0
+wandb: Run data is saved locally in /home/juanjo-malvado/thesis/wandb/run-20260917_234647-pjcot368
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run pairs_graph_smiles_scratch_fused_s2025
+wandb: ⭐️ View project at https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-generation-pairs
+wandb: 🚀 View run at https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-generation-pairs/runs/pjcot368
+GPU: NVIDIA RTX PRO 4500 Blackwell | VRAM 34 GB
+Loaded graph cache from /home/juanjo-malvado/thesis/data/moses_solo/molecule_graph_cache_ogb.npz (1,936,381 molecules)
+Split by scaffold: train=12,401,262 val=285,749 test=301,602 pairs over 448,901 scaffolds
+
+arm=graph+smiles  params=14,113,319  budget=60,000 steps x batch 256 = 15,360,000 examples
+  bf16 autocast enabled
+
+step   2,000/60,000 | train 0.5080 | val 0.4659 acc 0.829 | 20.0 it/s | eta 48 min
+step   4,000/60,000 | train 0.3499 | val 0.2987 acc 0.888 | 20.0 it/s | eta 47 min
+step   6,000/60,000 | train 0.2742 | val 0.2389 acc 0.909 | 19.9 it/s | eta 45 min
+step   8,000/60,000 | train 0.2357 | val 0.2118 acc 0.919 | 19.9 it/s | eta 44 min
+step  10,000/60,000 | train 0.2236 | val 0.1912 acc 0.926 | 19.9 it/s | eta 42 min
+step  12,000/60,000 | train 0.1986 | val 0.1745 acc 0.933 | 19.9 it/s | eta 40 min
+step  14,000/60,000 | train 0.2005 | val 0.1659 acc 0.937 | 19.9 it/s | eta 39 min
+step  16,000/60,000 | train 0.1833 | val 0.1578 acc 0.939 | 19.9 it/s | eta 37 min
+step  18,000/60,000 | train 0.1818 | val 0.1499 acc 0.942 | 19.9 it/s | eta 35 min
+step  20,000/60,000 | train 0.1581 | val 0.1427 acc 0.945 | 19.9 it/s | eta 34 min
+step  22,000/60,000 | train 0.1630 | val 0.1380 acc 0.947 | 19.9 it/s | eta 32 min
+step  24,000/60,000 | train 0.1517 | val 0.1330 acc 0.949 | 19.9 it/s | eta 30 min
+step  26,000/60,000 | train 0.1452 | val 0.1309 acc 0.949 | 19.9 it/s | eta 29 min
+step  28,000/60,000 | train 0.1503 | val 0.1265 acc 0.951 | 19.9 it/s | eta 27 min
+step  30,000/60,000 | train 0.1380 | val 0.1232 acc 0.953 | 19.9 it/s | eta 25 min
+step  32,000/60,000 | train 0.1369 | val 0.1205 acc 0.953 | 19.9 it/s | eta 23 min
+step  34,000/60,000 | train 0.1422 | val 0.1176 acc 0.954 | 19.9 it/s | eta 22 min
+step  36,000/60,000 | train 0.1333 | val 0.1149 acc 0.955 | 19.9 it/s | eta 20 min
+step  38,000/60,000 | train 0.1348 | val 0.1117 acc 0.957 | 19.9 it/s | eta 18 min
+step  40,000/60,000 | train 0.1325 | val 0.1109 acc 0.957 | 19.9 it/s | eta 17 min
+step  42,000/60,000 | train 0.1325 | val 0.1087 acc 0.958 | 19.9 it/s | eta 15 min
+step  44,000/60,000 | train 0.1346 | val 0.1061 acc 0.959 | 19.9 it/s | eta 13 min
+step  46,000/60,000 | train 0.1211 | val 0.1050 acc 0.959 | 19.9 it/s | eta 12 min
+step  48,000/60,000 | train 0.1278 | val 0.1036 acc 0.959 | 19.9 it/s | eta 10 min
+step  50,000/60,000 | train 0.1162 | val 0.1035 acc 0.960 | 19.9 it/s | eta 8 min
+step  52,000/60,000 | train 0.1242 | val 0.1025 acc 0.960 | 19.9 it/s | eta 7 min
+step  54,000/60,000 | train 0.1313 | val 0.1023 acc 0.960 | 19.9 it/s | eta 5 min
+step  56,000/60,000 | train 0.1208 | val 0.1017 acc 0.960 | 19.9 it/s | eta 3 min
+step  58,000/60,000 | train 0.1117 | val 0.1015 acc 0.960 | 19.9 it/s | eta 2 min
+step  60,000/60,000 | train 0.1153 | val 0.1015 acc 0.960 | 19.9 it/s | eta 0 min
+wandb: updating run metadata
+wandb: uploading config.yaml; uploading output.log; uploading wandb-summary.json
+wandb: uploading history steps 28-29, summary, console lines 36-39
+wandb: 
+wandb: Run history:
+wandb:            lr ██████▇▇▇▆▆▆▅▅▅▄▄▄▃▃▃▂▂▂▂▁▁▁▁▁
+wandb:    train/loss █▅▄▃▃▃▃▂▂▂▂▂▂▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:      val/loss █▅▄▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: val/token_acc ▁▄▅▆▆▇▇▇▇▇▇▇▇▇████████████████
+wandb: 
+wandb: Run summary:
+wandb:           arm graph+smiles
+wandb: best_val_loss 0.10153
+wandb:    checkpoint /home/juanjo-malvado...
+wandb:            lr 0
+wandb:        params 14113319
+wandb:         steps 60000
+wandb:    train/loss 0.11532
+wandb:      val/loss 0.10153
+wandb: val/token_acc 0.96033
+wandb: 
+wandb: 🚀 View run pairs_graph_smiles_scratch_fused_s2025 at: https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-generation-pairs/runs/pjcot368
+wandb: ⭐️ View project at: https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-generation-pairs
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260917_234647-pjcot368/logs
+
+Done: 60,000 steps in 50 min | best val loss 0.1015
+Checkpoint: /home/juanjo-malvado/thesis/checkpoints/pairs/pairs_graph_smiles_scratch_fused_s2025.pt

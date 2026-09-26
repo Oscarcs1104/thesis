@@ -1,0 +1,187 @@
+nohup: ignoring input
+NVIDIA RTX PRO 4500 Blackwell | kernels OK True
+
+=== fila: scratch -> results/pretrained_ablation_resplit_scratch.csv (17:05:16) ===
+
+=== esol | hybrid | seed 2025 ===
+    [esol seed 2025] repartitioned: train=902 valid=113 test=113
+  rmse=0.8437 mae=0.6264 r2=0.8255 (18s, best epoch 36, 7,726,090/7,726,090 trainable)
+
+=== esol | hybrid | seed 2026 ===
+    [esol seed 2026] repartitioned: train=902 valid=113 test=113
+  rmse=0.7774 mae=0.5889 r2=0.8699 (12s, best epoch 14, 7,726,090/7,726,090 trainable)
+
+=== esol | hybrid | seed 2027 ===
+    [esol seed 2027] repartitioned: train=902 valid=113 test=113
+  rmse=0.7364 mae=0.5520 r2=0.8552 (19s, best epoch 43, 7,726,090/7,726,090 trainable)
+
+=== freesolv | hybrid | seed 2025 ===
+    [freesolv seed 2025] repartitioned: train=513 valid=64 test=65
+  rmse=1.3262 mae=1.0107 r2=0.8342 (8s, best epoch 27, 7,725,578/7,725,578 trainable)
+
+=== freesolv | hybrid | seed 2026 ===
+    [freesolv seed 2026] repartitioned: train=513 valid=64 test=65
+  rmse=1.5499 mae=1.1426 r2=0.8390 (8s, best epoch 26, 7,725,578/7,725,578 trainable)
+
+=== freesolv | hybrid | seed 2027 ===
+    [freesolv seed 2027] repartitioned: train=513 valid=64 test=65
+  rmse=1.1277 mae=0.8553 r2=0.8926 (9s, best epoch 35, 7,725,578/7,725,578 trainable)
+
+=== lipo | hybrid | seed 2025 ===
+    [lipo seed 2025] repartitioned: train=3360 valid=420 test=420
+  rmse=0.8653 mae=0.6673 r2=0.4995 (63s, best epoch 27, 7,726,602/7,726,602 trainable)
+
+=== lipo | hybrid | seed 2026 ===
+    [lipo seed 2026] repartitioned: train=3360 valid=420 test=420
+  rmse=0.8442 mae=0.6503 r2=0.5143 (73s, best epoch 36, 7,726,602/7,726,602 trainable)
+
+=== lipo | hybrid | seed 2027 ===
+    [lipo seed 2027] repartitioned: train=3360 valid=420 test=420
+  rmse=0.8517 mae=0.6491 r2=0.4935 (57s, best epoch 21, 7,726,602/7,726,602 trainable)
+
+==============================================================================
+RMSE, mean +/- std over seeds (lower is better)
+==============================================================================
+config                          esol            freesolv                lipo
+----------------------------------------------------------------------------
+hybrid                  0.786 +/-0.054        1.335 +/-0.211        0.854 +/-0.011
+
+Wrote results/pretrained_ablation_resplit_scratch.csv
+
+=== fila: init -> results/pretrained_ablation_resplit_init.csv (17:09:44) ===
+
+=== esol | hybrid | seed 2025 ===
+    [esol seed 2025] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.5397 mae=0.3877 r2=0.9286 (16s, best epoch 28, 7,724,554/7,724,554 trainable)
+
+=== esol | hybrid | seed 2026 ===
+    [esol seed 2026] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.6480 mae=0.4546 r2=0.9096 (20s, best epoch 45, 7,724,554/7,724,554 trainable)
+
+=== esol | hybrid | seed 2027 ===
+    [esol seed 2027] repartitioned: train=902 valid=113 test=113
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.6359 mae=0.4769 r2=0.8920 (13s, best epoch 19, 7,724,554/7,724,554 trainable)
+
+=== freesolv | hybrid | seed 2025 ===
+    [freesolv seed 2025] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.9900 mae=0.5984 r2=0.9076 (10s, best epoch 37, 7,724,554/7,724,554 trainable)
+
+=== freesolv | hybrid | seed 2026 ===
+    [freesolv seed 2026] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=1.0445 mae=0.7167 r2=0.9269 (8s, best epoch 24, 7,724,554/7,724,554 trainable)
+
+=== freesolv | hybrid | seed 2027 ===
+    [freesolv seed 2027] repartitioned: train=513 valid=64 test=65
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.8501 mae=0.6005 r2=0.9390 (8s, best epoch 28, 7,724,554/7,724,554 trainable)
+
+=== lipo | hybrid | seed 2025 ===
+    [lipo seed 2025] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.6445 mae=0.4858 r2=0.7223 (55s, best epoch 19, 7,724,554/7,724,554 trainable)
+
+=== lipo | hybrid | seed 2026 ===
+    [lipo seed 2026] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.6572 mae=0.5154 r2=0.7057 (67s, best epoch 30, 7,724,554/7,724,554 trainable)
+
+=== lipo | hybrid | seed 2027 ===
+    [lipo seed 2027] repartitioned: train=3360 valid=420 test=420
+  initialized from checkpoints/pretrain_moses/hybrid_graph_smiles_s2025.pt (step 40000), head reset
+  rmse=0.6759 mae=0.5181 r2=0.6809 (61s, best epoch 25, 7,724,554/7,724,554 trainable)
+
+==============================================================================
+RMSE, mean +/- std over seeds (lower is better)
+==============================================================================
+config                          esol            freesolv                lipo
+----------------------------------------------------------------------------
+hybrid                  0.608 +/-0.059        0.962 +/-0.100        0.659 +/-0.016
+
+Wrote results/pretrained_ablation_resplit_init.csv
+
+=== done (17:14:04) ===
+
+==============================================================================
+1. Mitad predictiva -- ESOL / FreeSolv / Lipophilicity
+==============================================================================
+
+  esol
+    fila                               RMSE       MAE       R2   n
+    desde cero               0.7633 +/- 0.0572   0.5812   0.8570   6
+    preentrenado (MOSES)     0.6092 +/- 0.0452   0.4493   0.9087   6
+      -> preentrenado (MOSES) mejor por 0.1541 RMSE, 3.0x la dispersion entre medias (semillas no emparejadas) (0.0512)
+
+  freesolv
+    fila                               RMSE       MAE       R2   n
+    desde cero               1.3771 +/- 0.2294   1.0039   0.8638   6
+    preentrenado (MOSES)     1.0504 +/- 0.1444   0.6726   0.9211   6
+      -> preentrenado (MOSES) mejor por 0.3267 RMSE, 1.7x la dispersion entre medias (semillas no emparejadas) (0.1869)
+
+  lipo
+    fila                               RMSE       MAE       R2   n
+    desde cero               0.8491 +/- 0.0405   0.6404   0.5143   6
+    preentrenado (MOSES)     0.6651 +/- 0.0204   0.5036   0.7023   6
+      -> preentrenado (MOSES) mejor por 0.1840 RMSE, 6.0x la dispersion entre medias (semillas no emparejadas) (0.0304)
+
+  RMSE menor es mejor. La desviacion es sobre semillas. Con 3 semillas esto es
+  una comprobacion de cordura, no una prueba estadistica: sirve para descartar
+  diferencias que no existen, no para afirmar las que si.
+
+==============================================================================
+2. Generacion, entrenamiento -- NO responde la pregunta de la tesis
+==============================================================================
+
+    corrida                                     params    pasos  val loss  tok acc   min
+    pairs_graph-only_scratch_s2025          10,135,588   60,000    0.1047   0.9588    16
+    pairs_graph_smiles_pretrained_s2025     14,113,319   60,000    0.1249   0.9510    31
+    pairs_graph_smiles_scratch_s2025        14,113,319   60,000    0.0953   0.9628    31
+    pairs_smiles-only_scratch_s2025         10,893,857   60,000    0.0981   0.9616    26
+
+  Esto mide reconstruccion de SELFIES. Como los pares tienen Tanimoto >= 0.50,
+  un modelo que copie la semilla puntua bien sin haber aprendido a condicionar.
+  Sirve para ver que el entrenamiento convergio, no para comparar brazos.
+
+  La columna de parametros si es comparable: los brazos de una sola modalidad
+  deberian quedar cerca entre si. Si graph-only tiene ~450k y smiles-only ~3.9M,
+  el checkpoint es anterior al equiparado de capacidad y la ablacion no es valida.
+
+==============================================================================
+3. Generacion, oraculo -- ESTA es la pregunta de la tesis
+==============================================================================
+
+    brazo                             w     rho   pend.  valid  unico  novel  copia  tanim    nulo     sd
+    pairs_graph-only_scratch_s2025  1.0  +0.786  +0.866  1.000  0.935  0.857  0.039  0.522  -0.145  0.754
+                                    3.0  +0.851  +1.114  1.000  0.959  0.877  0.035  0.482  -0.153  0.755
+    pairs_graph_smiles_pretrained_  1.0  +0.778  +0.893  1.000  0.958  0.885  0.025  0.463  -0.222  0.783
+                                    3.0  +0.806  +1.158  1.000  0.951  0.904  0.014  0.435  -0.222  0.734
+    pairs_graph_smiles_scratch_s20  1.0  +0.811  +0.900  1.000  0.930  0.854  0.040  0.520  -0.263  0.763
+                                    3.0  +0.856  +1.145  1.000  0.950  0.874  0.038  0.490  -0.181  0.761
+    pairs_smiles-only_scratch_s202  1.0  +0.812  +0.885  1.000  0.933  0.845  0.044  0.525  -0.156  0.668
+                                    3.0  +0.871  +1.131  1.000  0.950  0.876  0.034  0.481  -0.168  0.638
+
+  rho   correlacion entre el bin pedido y el delta obtenido, intra-semilla.
+        Es el numero. Un modelo que ignora la condicion da ~0 aunque su
+        perdida de la seccion 2 sea la mejor de las cuatro.
+  pend. delta obtenido por unidad de delta pedido; 1.0 seria obediencia exacta.
+  copia fraccion que devuelve la semilla sin cambios. rho alto con copia alta
+        no existe, pero copia alta con rho ~0 es el modo de fallo esperado.
+
+  Si rho no sube al subir w, la guia libre de clasificador no esta haciendo
+  nada, que es el diagnostico gratis que esa perilla compra.
+
+  nulo  el mismo brazo, mismas semillas, condicion puesta al bin nulo. Es la
+        referencia honesta: si su delta medio y su dispersion se parecen a los
+        de los bins pedidos, la condicion no esta haciendo el trabajo y rho
+        viene de otra parte. Debe rondar cero con dispersion ancha.
+
+==============================================================================
+Estado
+==============================================================================
+  [x] mitad predictiva
+  [x] generacion (entrenamiento)
+  [x] generacion (oraculo)

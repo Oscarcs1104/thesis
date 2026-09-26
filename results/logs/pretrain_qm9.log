@@ -1,0 +1,103 @@
+nohup: ignoring input
+NVIDIA RTX PRO 4500 Blackwell | torch 2.11.0+cu128
+GPU kernels OK
+--- GPU ahora mismo ---
+16 MiB, 32623 MiB, 0 %
+  libre
+-----------------------
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/juanjo-malvado/.netrc.
+wandb: Currently logged in as: juan2220049 (juan2220049-universidad-industrial-de-santander) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Using a boolean value for 'reinit' is deprecated. Use 'return_previous' or 'finish_previous' instead.
+wandb: setting up run bscbqdr0
+wandb: Tracking run with wandb version 0.30.0
+wandb: Run data is saved locally in /home/juanjo-malvado/thesis/wandb/run-20260917_015835-bscbqdr0
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run hybrid_graph_smiles_qm9_s2025
+wandb: ⭐️ View project at https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-pretrain-moses
+wandb: 🚀 View run at https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-pretrain-moses/runs/bscbqdr0
+GPU: NVIDIA RTX PRO 4500 Blackwell | VRAM 34 GB
+corpus: 2,065,496 molecules, fingerprint 226cf9d8db1b, sources ['/home/juanjo-malvado/thesis/data/moses/dataset_v1.csv', 'data/qm9.csv']
+Graph cache does not match corpus.csv (cache fingerprint is ee3a559a71c9, corpus is 226cf9d8db1b; 1,936,381 vs 2,065,496 molecules). Rebuilding.
+Featurizing 2,065,496 molecules (ogb schema) on 12 workers...
+  250,000/2,065,496 (5s)
+  500,000/2,065,496 (9s)
+  750,000/2,065,496 (14s)
+  1,000,000/2,065,496 (18s)
+  1,250,000/2,065,496 (22s)
+  1,500,000/2,065,496 (27s)
+  1,750,000/2,065,496 (31s)
+  2,000,000/2,065,496 (35s)
+  cache: 2,065,496 molecules, 1448 MB in RAM (38s)
+Saved graph cache to /home/juanjo-malvado/thesis/data/moses/molecule_graph_cache_ogb.npz
+Train 2,044,842 | val 20,654
+  logp   mean     2.312  std    1.065
+  tpsa   mean    63.958  std   19.611
+  qed    mean     0.784  std    0.125
+  mw     mean   295.823  std   52.235
+  arch=hybrid (hybrid_graph_smiles), everything from scratch
+  trainable: 0 backbone + 7,727,885 fusion/head
+  bf16 autocast enabled
+
+step   2,000/40,000 | train 0.0317 | val 0.0266 | RMSE logp 0.113  tpsa 2.469  qed 0.031  mw 6.949 | 41.9 it/s | eta 15 min
+step   4,000/40,000 | train 0.0227 | val 0.0118 | RMSE logp 0.087  tpsa 1.339  qed 0.023  mw 2.797 | 41.8 it/s | eta 14 min
+step   6,000/40,000 | train 0.0241 | val 0.0149 | RMSE logp 0.123  tpsa 1.780  qed 0.020  mw 5.674 | 41.9 it/s | eta 14 min
+step   8,000/40,000 | train 0.0196 | val 0.0111 | RMSE logp 0.118  tpsa 1.556  qed 0.019  mw 3.163 | 41.8 it/s | eta 13 min
+step  10,000/40,000 | train 0.0149 | val 0.0112 | RMSE logp 0.145  tpsa 1.017  qed 0.018  mw 2.995 | 41.8 it/s | eta 12 min
+step  12,000/40,000 | train 0.0137 | val 0.0078 | RMSE logp 0.080  tpsa 1.379  qed 0.015  mw 3.837 | 41.8 it/s | eta 11 min
+step  14,000/40,000 | train 0.0176 | val 0.0096 | RMSE logp 0.111  tpsa 1.059  qed 0.017  mw 4.421 | 41.8 it/s | eta 10 min
+step  16,000/40,000 | train 0.0148 | val 0.0082 | RMSE logp 0.064  tpsa 1.583  qed 0.017  mw 3.810 | 41.7 it/s | eta 10 min
+step  18,000/40,000 | train 0.0169 | val 0.0051 | RMSE logp 0.065  tpsa 1.067  qed 0.014  mw 2.316 | 41.7 it/s | eta 9 min
+step  20,000/40,000 | train 0.0109 | val 0.0055 | RMSE logp 0.055  tpsa 1.196  qed 0.013  mw 3.922 | 41.7 it/s | eta 8 min
+step  22,000/40,000 | train 0.0110 | val 0.0042 | RMSE logp 0.071  tpsa 1.102  qed 0.011  mw 1.758 | 41.7 it/s | eta 7 min
+step  24,000/40,000 | train 0.0118 | val 0.0037 | RMSE logp 0.039  tpsa 1.200  qed 0.011  mw 2.648 | 41.7 it/s | eta 6 min
+step  26,000/40,000 | train 0.0090 | val 0.0030 | RMSE logp 0.039  tpsa 1.033  qed 0.010  mw 2.116 | 41.7 it/s | eta 6 min
+step  28,000/40,000 | train 0.0097 | val 0.0028 | RMSE logp 0.036  tpsa 0.891  qed 0.010  mw 2.288 | 41.7 it/s | eta 5 min
+step  30,000/40,000 | train 0.0094 | val 0.0022 | RMSE logp 0.037  tpsa 0.753  qed 0.009  mw 1.491 | 41.7 it/s | eta 4 min
+step  32,000/40,000 | train 0.0091 | val 0.0024 | RMSE logp 0.041  tpsa 0.846  qed 0.009  mw 1.803 | 41.7 it/s | eta 3 min
+step  34,000/40,000 | train 0.0089 | val 0.0022 | RMSE logp 0.041  tpsa 0.720  qed 0.009  mw 1.761 | 41.7 it/s | eta 2 min
+step  36,000/40,000 | train 0.0083 | val 0.0022 | RMSE logp 0.040  tpsa 0.753  qed 0.009  mw 1.758 | 41.7 it/s | eta 2 min
+step  38,000/40,000 | train 0.0086 | val 0.0021 | RMSE logp 0.037  tpsa 0.804  qed 0.008  mw 1.809 | 41.7 it/s | eta 1 min
+step  40,000/40,000 | train 0.0072 | val 0.0021 | RMSE logp 0.038  tpsa 0.817  qed 0.008  mw 1.777 | 41.7 it/s | eta 0 min
+
+Done: 40,000 steps in 16 min | best val 0.0021
+Checkpoint: /home/juanjo-malvado/thesis/checkpoints/pretrain_moses/hybrid_graph_smiles_qm9_s2025.pt
+
+Next:
+  python crossmodal_model/benchmark/pretrained_ablation.py --configs hybrid --init-checkpoint /home/juanjo-malvado/thesis/checkpoints/pretrain_moses/hybrid_graph_smiles_qm9_s2025.pt
+  python crossmodal_model/generation/train_pairs.py --init-encoder /home/juanjo-malvado/thesis/checkpoints/pretrain_moses/hybrid_graph_smiles_qm9_s2025.pt
+wandb: updating run metadata
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading wandb-summary.json; uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:            lr ███▇▇▇▆▆▅▅▄▄▃▃▂▂▁▁▁▁
+wandb:    train/loss █▅▆▅▃▃▄▃▄▂▂▂▂▂▂▂▁▁▁▁
+wandb:      val/loss █▄▅▄▄▃▃▃▂▂▂▁▁▁▁▁▁▁▁▁
+wandb: val/rmse_logp ▆▄▇▆█▄▆▃▃▂▃▁▁▁▁▁▁▁▁▁
+wandb:   val/rmse_mw █▃▆▃▃▄▅▄▂▄▁▂▂▂▁▁▁▁▁▁
+wandb:  val/rmse_qed █▅▅▄▄▃▄▄▃▂▂▂▂▁▁▁▁▁▁▁
+wandb: val/rmse_tpsa █▃▅▄▂▄▂▄▂▃▃▃▂▂▁▂▁▁▁▁
+wandb: 
+wandb: Run summary:
+wandb:          arch hybrid
+wandb: best_val_loss 0.00211
+wandb:    checkpoint /home/juanjo-malvado...
+wandb:            lr 0.0
+wandb:         steps 40000
+wandb:    train/loss 0.00717
+wandb:      val/loss 0.00214
+wandb: val/rmse_logp 0.03842
+wandb:   val/rmse_mw 1.77692
+wandb:  val/rmse_qed 0.00827
+wandb:            +1 ...
+wandb: 
+wandb: 🚀 View run hybrid_graph_smiles_qm9_s2025 at: https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-pretrain-moses/runs/bscbqdr0
+wandb: ⭐️ View project at: https://wandb.ai/juan2220049-universidad-industrial-de-santander/thesis-pretrain-moses
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260917_015835-bscbqdr0/logs
+
+total 60M
+-rw-rw-r-- 1 juanjo-malvado juanjo-malvado 4.9K Sep 17 02:15 hybrid_graph_smiles_qm9_s2025_history.json
+-rw-rw-r-- 1 juanjo-malvado juanjo-malvado  30M Sep 17 02:15 hybrid_graph_smiles_qm9_s2025.pt
+-rw-rw-r-- 1 juanjo-malvado juanjo-malvado 4.9K Sep 16 03:20 hybrid_graph_smiles_s2025_history.json
+-rw-rw-r-- 1 juanjo-malvado juanjo-malvado  30M Sep 16 03:20 hybrid_graph_smiles_s2025.pt
